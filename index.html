@@ -305,10 +305,12 @@ textarea.input{min-height:120px;resize:vertical;line-height:1.4}
 <div id="dlg-root"></div>
 <div id="toast" class="toast" role="status" aria-live="polite"></div>
 <script>
-/* ===== CONEXIÓN CON GOOGLE SHEETS =====
-   Pega entre las comillas el link de tu aplicación web de Apps Script
-   (termina en /exec). Si lo dejas vacío, la app guarda solo en este navegador. */
+/* No hace falta tocar esto: el link de Google se pega en la app, en Configuración.
+   Si lo pegas aquí (termina en /exec), queda fijo para todos. */
 window.LIGA_API_URL = '';
+window.LIGA_MODO = 'admin'; /* Pantalla principal con inicio de sesión — no cambies esta línea */
+/* Link de la vista de jugadores. Déjalo vacío y la app lo encuentra sola (carpeta view/). */
+window.LIGA_VISTA_URL = '';
 </script>
 <script type="application/json" id="league-data">null</script>
 <script id="app-code">
@@ -336,7 +338,7 @@ var ICON={
 };
 
 var state=null, canEdit=false, localMode=false, publicCopy=false;
-var gs=null, gsToken=null, gsVer='0', gsChecking=false, gsLoading=false, gsLoadErr=false, loginMsg='', TOKEN_KEY='ligaRelampago.token';
+var viewOnly=false, needSetup=false, setupMsg='', apiSource='', API_KEY='ligaRelampago.api', gs=null, gsToken=null, gsVer='0', gsChecking=false, gsLoading=false, gsLoadErr=false, loginMsg='', loginNoPass=false, TOKEN_KEY='ligaRelampago.token';
 var artifactApi=null, downloadsApi=null;
 var dirty=false, publishing=false, publishError=false, publishTimer=null, lastInput=0;
 var ui={tab:'standings',md:'all',team:'all',preview:false,scroll:0};
@@ -469,7 +471,7 @@ function playersSorted(t){
 }
 function getMatch(mk,id){return mk==='ko'?state.playoffs[id]||null:state.matches.find(function(m){return m.id===id;})||null;}
 function koFormat(){return state.teams.length<4?'direct_final':state.playoffsFormat;}
-function isAdmin(){return canEdit&&!ui.preview;}
+function isAdmin(){return canEdit&&!viewOnly&&!ui.preview;}
 
 function hasLeagueResults(){return state.matches.some(function(m){return m.status!=='pending'||m.events.length;});}
 function hasKoResults(){return KO_KEYS.some(function(k){var m=state.playoffs[k];return m.status!=='pending'||m.events.length;});}
@@ -577,6 +579,7 @@ function markPlayed(m,tid,pid){var l=m.lineups[tid];if(l&&l.starters.indexOf(pid
 
 /* ---------- guardado y publicación ---------- */
 function commit(msg){
+  if(!canEdit){render();return;}
   state.updatedAt=Date.now();
   resolveBracket();
   if(canEdit) lsSet(DRAFT_KEY,JSON.stringify(state));
@@ -634,7 +637,7 @@ function gsCall(fn){
   var args=[].slice.call(arguments,1);
   if(gs&&gs.api){
     if(fn==='datosPublicos') return fetch(gs.api+(gs.api.indexOf('?')<0?'?':'&')+'accion=datos&t='+Date.now()).then(function(r){return r.json();});
-    var names={entrar:['clave'],validar:['token'],cerrarSesion:['token'],guardar:['token','json','tablas','versionBase']}, body={accion:fn};
+    var names={entrar:['clave'],crearClave:['nueva'],cambiarClave:['token','actual','nueva'],validar:['token'],cerrarSesion:['token'],guardar:['token','json','tablas','versionBase']}, body={accion:fn};
     (names[fn]||[]).forEach(function(k,i){body[k]=args[i];});
     return fetch(gs.api,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify(body)}).then(function(r){return r.json();});
   }
@@ -674,6 +677,44 @@ function gsLogout(msg){
   try{localStorage.removeItem(TOKEN_KEY);}catch(e){}
   closeDialog(); render();
 }
+function apiFrom(x){
+  x=String(x||'').trim();
+  if(/^https:\/\/script\.google(usercontent)?\.com\/\S+$/.test(x)) return x;
+  if(/^[A-Za-z0-9_-]{20,}$/.test(x)) return 'https://script.google.com/macros/s/'+x+'/exec';
+  return '';
+}
+function apiId(u){var m=/\/macros\/s\/([^\/]+)\/exec/.exec(u||'');return m?m[1]:'';}
+function publicLink(){
+  if(!gs) return '';
+  var u=gs.url, id=apiId(gs.api);
+  return apiSource==='file'||!id?u:u+(u.indexOf('?')<0?'?':'&')+'liga='+encodeURIComponent(id);
+}
+function makeGs(api){
+  var base=location.origin+location.pathname.replace(/[^\/]*$/,'');
+  return {api:api,mode:window.LIGA_MODO==='public'?'public':'admin',url:window.LIGA_VISTA_URL||base+'view/',base:base,ver:'0'};
+}
+function testApi(api){
+  return fetch(api+(api.indexOf('?')<0?'?':'&')+'accion=datos&t='+Date.now()).then(function(r){return r.json();}).then(function(r){
+    if(!r||!('ver' in r)) throw new Error('bad'); return r;
+  });
+}
+function renderSetup(){
+  return '<header class="masthead">'+ICON.pitch+'<div class="wrap mast-inner"><div class="mast-title"><h1>'+esc(state.leagueName)+'</h1><p class="mast-sub">Primer paso</p></div></div></header>'+
+    '<main class="wrap main"><section class="panel" style="max-width:560px;margin:0 auto;display:flex;flex-direction:column;gap:14px">'+
+    '<h2>Conectar con Google Sheets</h2><p class="help">Pega el link de tu aplicación web de Apps Script. Lo encuentras en la hoja, menú <b>Liga → Ver links de la liga</b>, y termina en <b>/exec</b>.</p>'+
+    (setupMsg?'<p class="warn">'+esc(setupMsg)+'</p>':'')+
+    '<label class="setting"><span class="lbl">Link de Google</span><input class="input" id="setup-url" placeholder="https://script.google.com/macros/s/…/exec" data-enter="setup-connect" data-fk="setupurl" autocomplete="off"></label>'+
+    '<div class="btn-row"><button class="btn btn-primary" data-action="setup-connect">Probar y conectar</button><button class="btn" data-action="setup-local">Usar sin conexión</button></div>'+
+    '<p class="help">“Usar sin conexión” guarda la liga solo en este navegador, sin contraseña ni link para compartir.</p></section></main>';
+}
+function findViewUrl(){
+  if(!gs||gs.mode!=='admin'||window.LIGA_VISTA_URL||!window.fetch) return;
+  var c=[gs.base+'view/',gs.base+'view/ver.html',gs.base+'view/index.html',gs.base+'ver.html'];
+  (function next(i){
+    if(i>=c.length) return;
+    fetch(c[i],{method:'HEAD',cache:'no-store'}).then(function(r){if(r.ok){gs.url=c[i];render();} else next(i+1);}).catch(function(){next(i+1);});
+  })(0);
+}
 function gsPoll(){
   setInterval(function(){
     if(document.hidden||document.querySelector('dialog[open]')) return;
@@ -683,15 +724,20 @@ function gsPoll(){
 function renderLogin(){
   var body;
   if(gsChecking) body='<p class="help">Comprobando la sesión…</p>';
-  else body='<h2>Entrar como administradora</h2><p class="help">Solo quien tenga la clave puede cargar resultados y cambiar la liga.</p>'+
+  else if(loginNoPass) body='<h2>Crea tu contraseña</h2><p class="help">Es la primera vez que entras. Esta contraseña protege la liga: solo con ella se pueden cargar resultados y cambiar datos. Mínimo 6 caracteres.</p>'+
     (loginMsg?'<p class="warn">'+esc(loginMsg)+'</p>':'')+
-    '<label class="setting"><span class="lbl">Clave</span><input class="input" type="password" id="login-pw" autocomplete="current-password" data-enter="login" data-fk="loginpw"></label>'+
-    '<div class="btn-row"><button class="btn btn-primary" data-action="login">Entrar</button>'+(gs.url?'<a class="btn" href="'+esc(gs.url)+'" target="_top">Ver la liga sin clave</a>':'')+'</div>';
+    '<label class="setting"><span class="lbl">Contraseña</span><input class="input" type="password" id="np1" autocomplete="new-password" data-enter="create-pass" data-fk="np1"></label>'+
+    '<label class="switch"><input type="checkbox" data-show="np1"><span>Mostrar contraseña</span></label>'+
+    '<div class="btn-row"><button class="btn btn-primary" data-action="create-pass">Crear contraseña y entrar</button></div>';
+  else body='<h2>Iniciar sesión</h2><p class="help">Solo quien tenga la contraseña puede cargar resultados y cambiar la liga.</p>'+
+    (loginMsg?'<p class="warn">'+esc(loginMsg)+'</p>':'')+
+    '<label class="setting"><span class="lbl">Contraseña</span><input class="input" type="password" id="login-pw" autocomplete="current-password" data-enter="login" data-fk="loginpw"></label>'+
+    '<div class="btn-row"><button class="btn btn-primary" data-action="login">Entrar</button>'+(gs.url?'<a class="btn" href="'+esc(publicLink())+'" target="_top">Ver la vista de jugadores</a>':'')+'</div>';
   return '<header class="masthead">'+ICON.pitch+'<div class="wrap mast-inner"><div class="mast-title"><h1>'+esc(state.leagueName)+'</h1><p class="mast-sub">Administración</p></div></div></header>'+
     '<main class="wrap main"><section class="panel" style="max-width:460px;margin:0 auto;display:flex;flex-direction:column;gap:14px">'+body+'</section></main>';
 }
 function openLinkShare(){
-  var url=gs.url, text='Tabla, resultados y estadísticas de '+state.leagueName+': '+url;
+  var url=publicLink(), text='Tabla, resultados y estadísticas de '+state.leagueName+': '+url;
   var st={type:'share',text:url};
   openDialog(dlgHead('Compartir la liga')+'<div class="dlg-body"><p>Quien abra este link ve la liga sin clave y sin poder cambiar nada. Se actualiza sola cada vez que guardas.</p>'+
     '<label class="setting"><span class="lbl">Link de la liga</span><input class="input" id="share-text" readonly value="'+esc(url)+'"></label></div>'+
@@ -734,9 +780,10 @@ function availableTabs(){
 }
 function render(){
   var fk=forceFocus||focusKey(); forceFocus=null;
-  if(gs&&(gsLoading||gsLoadErr)){
-    appEl.innerHTML='<header class="masthead">'+ICON.pitch+'<div class="wrap mast-inner"><div class="mast-title"><h1>'+(gsLoadErr?'Sin conexión':'Cargando…')+'</h1><p class="mast-sub">'+(gsLoadErr?'No se pudo cargar la liga. Revisa tu internet.':'Trayendo la liga desde Google Sheets')+'</p></div></div></header>'+
-      (gsLoadErr?'<main class="wrap main"><button class="btn btn-primary" data-action="reload-page">Reintentar</button></main>':'');
+  if(needSetup){document.title=state.leagueName;appEl.innerHTML=renderSetup();restoreFocus(fk||'setupurl');return;}
+  if((gs||viewOnly)&&(gsLoading||gsLoadErr)){
+    appEl.innerHTML='<header class="masthead">'+ICON.pitch+'<div class="wrap mast-inner"><div class="mast-title"><h1>'+(gsLoadErr==='noapi'?'Liga sin conectar':gsLoadErr?'Sin conexión':'Cargando…')+'</h1><p class="mast-sub">'+(gsLoadErr==='noapi'?'Esta vista todavía no está conectada a la hoja de Google.':gsLoadErr?'No se pudo cargar la liga. Revisa tu internet.':'Trayendo la liga desde Google Sheets')+'</p></div></div></header>'+
+      (gsLoadErr&&gsLoadErr!=='noapi'?'<main class="wrap main"><button class="btn btn-primary" data-action="reload-page">Reintentar</button></main>':'');
     return;
   }
   if(gs&&gs.mode==='admin'&&!canEdit){document.title=state.leagueName;appEl.innerHTML=renderLogin();restoreFocus(fk||'loginpw');return;}
@@ -1049,24 +1096,49 @@ function renderTeamsPanel(){
 
 /* ---------- configuración ---------- */
 function renderConfigPanel(){
-  return '<div class="settings">'+
-    '<div class="settings-col">'+
-    '<section class="panel"><h2>General</h2>'+
+  var respaldo='<section class="panel"><h2>Respaldo</h2><p class="help">Descarga una copia de todo el torneo o recupéralo desde un respaldo guardado.</p>'+
+      '<div class="btn-row"><button class="btn" data-action="export">Descargar respaldo</button><button class="btn" data-action="import-open">Cargar respaldo</button></div>'+
+      '<input type="file" id="import-input" accept="application/json,.json" data-change="import" hidden></section>';
+  var general='<section class="panel"><h2>General</h2>'+
       '<label class="setting"><span class="lbl">Nombre de la liga</span><input class="input" maxlength="60" value="'+esc(state.leagueName)+'" data-change="league-name" data-fk="cfgname"></label>'+
       '<label class="setting"><span class="lbl">Fase regular</span><select class="input" data-change="format" data-fk="cfgfmt"><option value="single"'+(state.format==='single'?' selected':'')+'>Solo ida</option><option value="double"'+(state.format==='double'?' selected':'')+'>Ida y vuelta</option></select><span class="help">Cambiarla rehace el calendario.</span></label>'+
       '<label class="setting"><span class="lbl">Jugadores en cancha por equipo</span><input class="input" type="number" min="3" max="11" inputmode="numeric" value="'+state.starters+'" data-change="starters" data-fk="cfgst" style="max-width:120px"><span class="help">Se usa para revisar las alineaciones. Fútbol sala: 5.</span></label>'+
       '<label class="switch"><input type="checkbox" data-change="playoffs-enabled" data-fk="cfgko"'+(state.playoffsEnabled?' checked':'')+'><span>Jugar liguilla al terminar la fase regular</span></label>'+
-    '</section>'+
-    '<section class="panel"><h2>Respaldo</h2><p class="help">Descarga una copia de todo el torneo o recupéralo desde un respaldo guardado.</p>'+
-      '<div class="btn-row"><button class="btn" data-action="export">Descargar respaldo</button><button class="btn" data-action="import-open">Cargar respaldo</button></div>'+
-      '<input type="file" id="import-input" accept="application/json,.json" data-change="import" hidden></section>'+
-    '</div><div class="settings-col">'+
-    '<section class="panel"><h2>Vista pública</h2><p class="help">'+(gs?'Comparte el link de la liga por WhatsApp. Quien lo abra ve tabla, partidos, liguilla, estadísticas y plantillas sin clave y sin poder cambiar nada. Se actualiza sola cada vez que guardas.':localMode?'Comparte la liga tal como está ahora en modo solo lectura. En el celular se abre el menú de compartir (WhatsApp, Telegram, correo); en la computadora se descarga el archivo para que lo envíes. Los jugadores lo abren en el celular y ven tabla, partidos, liguilla, estadísticas y plantillas, sin poder cambiar nada. Cuando haya resultados nuevos, compártela otra vez.':'Quien abra el link sin permiso de edición ve la liga en modo lectura, sin botones para cambiar nada. Los cambios que hagas aquí se publican solos unos segundos después.')+'</p>'+
-      '<div class="btn-row">'+(localMode||gs?'<button class="btn btn-primary" data-action="export-public">Compartir vista de jugadores</button>':'')+'<button class="btn" data-action="preview-on">Ver como jugador</button></div></section>'+
-    '<section class="panel"><h2>Calendario</h2><p class="help">Las dos opciones rehacen todas las jornadas y borran los resultados cargados. En ambas, cada equipo juega una sola vez por jornada.</p>'+
-      '<div class="btn-row"><button class="btn" data-action="regen" data-mode="fixed">Generar en orden</button><button class="btn" data-action="regen" data-mode="random">Sortear calendario</button></div></section>'+
-    '<section class="panel danger"><h2>Reiniciar torneo</h2><p class="help">Vuelve a los 4 equipos de ejemplo y borra todo lo demás.</p><button class="btn btn-danger" data-action="reset">Reiniciar torneo</button></section>'+
-  '</div></div>';
+    '</section>';
+  var vista='<section class="panel"><h2>Vista pública</h2><p class="help">'+(gs?'Comparte el link de la liga por WhatsApp. Quien lo abra ve tabla, partidos, liguilla, estadísticas y plantillas sin clave y sin poder cambiar nada. Se actualiza sola cada vez que guardas.':localMode?'Comparte la liga tal como está ahora en modo solo lectura. En el celular se abre el menú de compartir (WhatsApp, Telegram, correo); en la computadora se descarga el archivo para que lo envíes. Los jugadores lo abren en el celular y ven tabla, partidos, liguilla, estadísticas y plantillas, sin poder cambiar nada. Cuando haya resultados nuevos, compártela otra vez.':'Quien abra el link sin permiso de edición ve la liga en modo lectura, sin botones para cambiar nada. Los cambios que hagas aquí se publican solos unos segundos después.')+'</p>'+
+      '<div class="btn-row">'+(localMode||gs?'<button class="btn btn-primary" data-action="export-public">Compartir vista de jugadores</button>':'')+'<button class="btn" data-action="preview-on">Ver como jugador</button></div></section>';
+  var calendario='<section class="panel"><h2>Calendario</h2><p class="help">Las dos opciones rehacen todas las jornadas y borran los resultados cargados. En ambas, cada equipo juega una sola vez por jornada.</p>'+
+      '<div class="btn-row"><button class="btn" data-action="regen" data-mode="fixed">Generar en orden</button><button class="btn" data-action="regen" data-mode="random">Sortear calendario</button></div></section>';
+  var reiniciar='<section class="panel danger"><h2>Reiniciar torneo</h2><p class="help">Vuelve a los 4 equipos de ejemplo y borra todo lo demás.</p><button class="btn btn-danger" data-action="reset">Reiniciar torneo</button></section>';
+  var col=function(a){return '<div class="settings-col">'+a.join('')+'</div>';};
+  var hosted=!!window.LIGA_MODO;
+  if(!gs&&!hosted) return '<div class="settings">'+col([general,respaldo])+col([vista,calendario,reiniciar])+'</div>';
+  if(!gs){
+    var conexion0='<section class="panel"><h2>Conexión con Google Sheets</h2>'+
+      '<p class="warn" style="margin:0">No conectada</p>'+
+      '<p class="help">Ahora la liga se guarda solo en este navegador. Pega el link de tu aplicación web de Apps Script (menú <b>Liga → Ver links de la liga</b> en tu hoja; termina en <b>/exec</b>). Lo que ya cargaste aquí se sube a la hoja al conectar.</p>'+
+      '<label class="setting"><span class="lbl">Link de Google</span><input class="input" id="conn-url" placeholder="https://script.google.com/macros/s/…/exec" data-fk="connurl" autocomplete="off"></label>'+
+      '<label class="setting"><span class="lbl">Contraseña de la liga</span><input class="input" type="password" id="conn-pw" autocomplete="current-password" data-enter="conn-change" data-fk="connpw"><span class="help">Es una sola contraseña, guardada en tu hoja de Google: la misma en todos tus dispositivos. Si la hoja es nueva, la que escribas aquí queda como contraseña.</span></label>'+
+      '<label class="switch"><input type="checkbox" data-show="conn-pw"><span>Mostrar contraseña</span></label>'+
+      '<div class="btn-row"><button class="btn btn-primary" data-action="conn-change">Conectar</button></div></section>';
+    var clave0='<section class="panel"><h2>Contraseña</h2><p class="help">Se crea en <b>Conexión con Google Sheets</b>, junto con el link. Una vez conectada, aquí podrás cambiarla.</p></section>';
+    return '<div class="settings">'+col([general,conexion0])+col([vista,clave0,calendario,respaldo,reiniciar])+'</div>';
+  }
+  var conexion='<section class="panel"><h2>Conexión con Google Sheets</h2>'+
+      '<p class="help" style="margin:0;color:var(--win);font-weight:600">Conectada</p>'+
+      '<p class="help">'+(apiSource==='file'?'El link está fijo dentro del archivo index.html. Para cambiarlo, edita ese archivo en GitHub.':'La liga se guarda en tu hoja de Google. Si creas una implementación nueva en Apps Script, pega aquí el link nuevo.')+'</p>'+
+      '<label class="setting"><span class="lbl">Link actual</span><input class="input" readonly value="'+esc(gs.api)+'" data-fk="connnow"></label>'+
+      (apiSource==='file'?'':'<label class="setting"><span class="lbl">Link nuevo</span><input class="input" id="conn-url" placeholder="https://script.google.com/macros/s/…/exec" data-fk="connurl" autocomplete="off"></label>'+
+      '<label class="setting"><span class="lbl">Contraseña de la liga</span><input class="input" type="password" id="conn-pw" autocomplete="current-password" data-enter="conn-change" data-fk="connpw"><span class="help">Es una sola contraseña, guardada en tu hoja de Google: la misma en todos tus dispositivos. Si la hoja es nueva, la que escribas aquí queda como contraseña.</span></label>'+
+      '<label class="switch"><input type="checkbox" data-show="conn-pw"><span>Mostrar contraseña</span></label>'+
+      '<div class="btn-row"><button class="btn" data-action="conn-change">Cambiar link</button><button class="btn btn-danger" data-action="conn-remove">Desconectar este dispositivo</button></div>')+
+      '</section>';
+  var clave='<section class="panel"><h2>Contraseña</h2><p class="help">Es la contraseña de tu hoja de Google, la misma en todos tus dispositivos. Al cambiarla se cierran las sesiones abiertas en los demás.</p>'+
+      '<label class="setting"><span class="lbl">Contraseña actual</span><input class="input" type="password" id="cp0" autocomplete="current-password" data-fk="cp0"></label>'+
+      '<label class="setting"><span class="lbl">Nueva contraseña</span><input class="input" type="password" id="cp1" autocomplete="new-password" data-enter="change-pass" data-fk="cp1"></label>'+
+      '<label class="switch"><input type="checkbox" data-show="cp0,cp1"><span>Mostrar contraseñas</span></label>'+
+      '<div class="btn-row"><button class="btn" data-action="change-pass">Cambiar contraseña</button></div></section>';
+  return '<div class="settings">'+col([general,conexion,calendario])+col([vista,clave,respaldo,reiniciar])+'</div>';
 }
 
 /* ---------- diálogos ---------- */
@@ -1434,8 +1506,12 @@ function regenerate(random){
   state.matches=roundRobin(state.teams,state.format,random);
   state.playoffs=emptyPlayoffs(); ui.md='all';
 }
+var READONLY_ACTIONS={'setup-local':1,tab:1,team:1,share:1,'share-copy':1,'share-download':1,'dlg-close':1,'preview-on':1,'preview-off':1,'reload-page':1,login:1,'create-pass':1};
+var READONLY_CHANGES={'filter-md':1,'filter-team':1};
 function handleAction(action,el){
   var d=el.dataset, m, t;
+  if(!isAdmin()&&!READONLY_ACTIONS[action]) return;
+  if(!canEdit&&(action==='preview-on'||action==='preview-off')) return;
   switch(action){
     case 'tab': ui.tab=d.tab; saveUI(); render(); window.scrollTo(0,0); break;
     case 'team': openTeamSheet(d.id); break;
@@ -1524,11 +1600,72 @@ function handleAction(action,el){
         if(!pw){toast('Escribe la clave');return;}
         gsCall('entrar',pw).then(function(r){
           if(r&&r.ok){gsStartAdmin(r);toast('Sesión iniciada');return;}
-          loginMsg=r&&r.code==='nopass'?'Todavía no hay clave. Créala desde la hoja de cálculo: menú Liga, “Crear o cambiar clave”.':r&&r.code==='locked'?'Demasiados intentos. Espera 10 minutos.':'Clave incorrecta.';
+          if(r&&r.code==='nopass'){loginNoPass=true;loginMsg='';render();return;}
+          loginMsg=r&&r.code==='locked'?'Demasiados intentos. Espera 10 minutos.':'Contraseña incorrecta.';
           render();
         }).catch(function(){loginMsg='No se pudo conectar. Revisa tu internet.';render();});
       })(); break;
     case 'reload-page': location.reload(); break;
+    case 'setup-connect':
+      (function(){
+        var api=apiFrom((document.getElementById('setup-url')||{}).value);
+        if(!api){setupMsg='Ese link no parece de Apps Script. Debe empezar con https://script.google.com y terminar en /exec.';render();return;}
+        setupMsg='Probando la conexión…'; render();
+        testApi(api).then(function(){
+          lsSet(API_KEY,api); apiSource='saved'; gs=makeGs(api); needSetup=false; setupMsg='';
+          toast('Conectado con Google Sheets'); initCaps();
+        }).catch(function(){setupMsg='No se pudo conectar. Revisa que el link termine en /exec y que en la implementación diga “Quién tiene acceso: Cualquier usuario”.';render();});
+      })(); break;
+    case 'setup-local': needSetup=false; localMode=true; canEdit=true; applyDraft(); render(); break;
+    case 'conn-change':
+      (function(){
+        var api=apiFrom((document.getElementById('conn-url')||{}).value);
+        var pw=(document.getElementById('conn-pw')||{}).value||'';
+        if(!api){toast('Ese link no parece de Apps Script');return;}
+        if(pw.length<6){toast('La contraseña debe tener al menos 6 caracteres');return;}
+        if(dirty){toast('Espera a que se guarden los cambios');tryPublish(true);return;}
+        var post=function(body){return fetch(api,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify(body)}).then(function(r){return r.json();});};
+        toast('Conectando…');
+        testApi(api).then(function(){
+          return post({accion:'entrar',clave:pw}).then(function(r){
+            if(r&&r.code==='nopass') return post({accion:'crearClave',nueva:pw});
+            return r;
+          });
+        }).then(function(r){
+          if(!r||!r.ok){
+            toast(r&&r.code==='bad'?'Esa hoja ya tiene otra contraseña. Escribe esa.':r&&r.code==='locked'?'Demasiados intentos. Espera 10 minutos.':'No se pudo iniciar sesión en esa hoja');
+            return;
+          }
+          if(!gs) lsSet(DRAFT_KEY,JSON.stringify(state));
+          lsSet(API_KEY,api); lsSet(TOKEN_KEY,r.token);
+          location.reload();
+        }).catch(function(){toast('No se pudo conectar. Revisa que termine en /exec y que diga “Cualquier usuario”.');});
+      })(); break;
+    case 'conn-remove':
+      askConfirm({title:'Desconectar este dispositivo',body:'La app olvidará el link de Google en este navegador y te pedirá conectarla de nuevo. Los datos siguen guardados en tu hoja.',ok:'Desconectar',danger:true}).then(function(ok){
+        if(!ok) return; try{localStorage.removeItem(API_KEY);localStorage.removeItem(TOKEN_KEY);}catch(e){} location.href=location.pathname;
+      }); break;
+    case 'create-pass':
+      (function(){
+        var a=(document.getElementById('np1')||{}).value||'';
+        if(a.length<6){loginMsg='La contraseña debe tener al menos 6 caracteres.';render();return;}
+        gsCall('crearClave',a).then(function(r){
+          if(r&&r.ok){loginNoPass=false;gsStartAdmin(r);toast('Contraseña creada');return;}
+          if(r&&r.code==='exists'){loginNoPass=false;loginMsg='Ya existe una contraseña. Inicia sesión con ella.';render();return;}
+          loginMsg='No se pudo crear la contraseña.';render();
+        }).catch(function(){loginMsg='No se pudo conectar. Revisa tu internet.';render();});
+      })(); break;
+    case 'change-pass':
+      (function(){
+        var c=(document.getElementById('cp0')||{}).value||'', a=(document.getElementById('cp1')||{}).value||'';
+        if(!c){toast('Escribe tu contraseña actual');return;}
+        if(a.length<6){toast('La nueva contraseña debe tener al menos 6 caracteres');return;}
+        gsCall('cambiarClave',gsToken,c,a).then(function(r){
+          if(r&&r.ok){gsToken=r.token;lsSet(TOKEN_KEY,gsToken);['cp0','cp1'].forEach(function(id){var i=document.getElementById(id);if(i) i.value='';});toast('Contraseña cambiada');return;}
+          if(r&&r.code==='auth'){gsLogout('Tu sesión venció. Entra de nuevo.');return;}
+          toast(r&&r.code==='bad'?'La contraseña actual no es correcta':r&&r.code==='locked'?'Demasiados intentos. Espera 10 minutos.':'No se pudo cambiar la contraseña');
+        }).catch(function(){toast('No se pudo conectar. Revisa tu internet.');});
+      })(); break;
     case 'logout':
       if(dirty){toast('Espera a que se guarden los cambios');tryPublish(true);break;}
       if(gsToken) gsCall('cerrarSesion',gsToken).catch(function(){});
@@ -1586,6 +1723,7 @@ function handleAction(action,el){
 }
 function handleChange(kind,el){
   var d=el.dataset, v=el.value, m, t, p;
+  if(!isAdmin()&&!READONLY_CHANGES[kind]) return;
   switch(kind){
     case 'filter-md': ui.md=v; saveUI(); render(); break;
     case 'filter-team': ui.team=v; saveUI(); render(); break;
@@ -1648,7 +1786,9 @@ document.addEventListener('click',function(e){
   var el=e.target.closest('[data-action]'); if(!el||el.disabled) return;
   handleAction(el.dataset.action,el);
 });
-document.addEventListener('change',function(e){var el=e.target.closest('[data-change]');if(el) handleChange(el.dataset.change,el);});
+document.addEventListener('change',function(e){
+  var sh=e.target.closest&&e.target.closest('[data-show]');
+  if(sh){sh.dataset.show.split(',').forEach(function(id){var i=document.getElementById(id);if(i) i.type=sh.checked?'text':'password';});return;}var el=e.target.closest('[data-change]');if(el) handleChange(el.dataset.change,el);});
 document.addEventListener('keydown',function(e){
   lastInput=Date.now();
   if(e.key==='Enter'&&e.target.closest){var el=e.target.closest('[data-enter]');if(el){e.preventDefault();handleAction(el.dataset.enter,el);}}
@@ -1665,8 +1805,12 @@ function applyDraft(){
 function restoreScroll(){if(ui.scroll){var y=ui.scroll;ui.scroll=0;requestAnimationFrame(function(){window.scrollTo(0,y);});}}
 function initCaps(){
   var c=window.claude;
+  if(needSetup){canEdit=false;localMode=false;render();return;}
+  if(viewOnly&&!gs){canEdit=false;localMode=false;gsLoadErr='noapi';render();return;}
   if(gs){
     localMode=false; downloadsApi=null;
+    if(gs.mode!=='admin') canEdit=false;
+    findViewUrl();
     var start=function(){
       if(gs.mode!=='admin'){canEdit=false;render();restoreScroll();gsPoll();return;}
       gsToken=lsGet(TOKEN_KEY);
@@ -1697,11 +1841,17 @@ function initCaps(){
   });
 }
 function boot(){
+  viewOnly=window.LIGA_MODO==='public';
   try{var sv=document.getElementById('league-server');if(sv){gs=JSON.parse(sv.textContent);gsVer=String(gs.ver||'0');}}catch(e){gs=null;}
-  try{var cf=window.LIGA_API_URL;if(!gs&&cf&&/^https:\/\/script\.google(usercontent)?\.com\//.test(cf)){
-    var q=location.search||'';
-    gs={api:cf,mode:/[?&]admin\b/.test(q)?'admin':'public',url:location.origin+location.pathname,ver:'0'};
-  }}catch(e){}
+  try{
+    if(!gs&&window.LIGA_MODO){
+      var fixed=apiFrom(window.LIGA_API_URL), m=/[?&]liga=([^&#]+)/.exec(location.search), fromLink=m?apiFrom(decodeURIComponent(m[1])):'', saved=apiFrom(lsGet(API_KEY));
+      var api=fixed||fromLink||saved;
+      apiSource=fixed?'file':fromLink?'link':saved?'saved':'';
+      if(fromLink) lsSet(API_KEY,fromLink);
+      if(api) gs=makeGs(api);
+    }
+  }catch(e){}
   try{var md=document.getElementById('league-mode');publicCopy=!!md&&JSON.parse(md.textContent)==='public';}catch(e){}
   var raw=null; try{raw=JSON.parse(document.getElementById('league-data').textContent||'null');}catch(e){}
   state=normalize(raw)||seedState();

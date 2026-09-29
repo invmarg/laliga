@@ -1126,6 +1126,8 @@ function renderConfigPanel(){
       '<p class="help" style="margin:0;color:var(--win);font-weight:600">Conectada</p>'+
       '<p class="help">'+(apiSource==='file'?'El link está fijo dentro del archivo index.html. Para cambiarlo, edita ese archivo en GitHub.':'La liga se guarda en tu hoja de Google. Si creas una implementación nueva en Apps Script, pega aquí el link nuevo.')+'</p>'+
       '<label class="setting"><span class="lbl">Link actual</span><input class="input" readonly value="'+esc(gs.api)+'" data-fk="connnow"></label>'+
+      (apiSource==='file'?'':'<label class="setting"><span class="lbl">Link para entrar desde otro dispositivo</span><input class="input" id="admin-link" readonly value="'+esc(gs.base+'?liga='+encodeURIComponent(apiId(gs.api)))+'" data-fk="adminlink"><span class="help">Ábrelo en otro celular o computadora: pedirá solo la contraseña. No lo compartas con los jugadores.</span></label>'+
+      '<div class="btn-row"><button class="btn" data-action="copy-admin-link">Copiar link</button></div>')+
       (apiSource==='file'?'':'<label class="setting"><span class="lbl">Link nuevo</span><input class="input" id="conn-url" placeholder="https://script.google.com/macros/s/…/exec" data-fk="connurl" autocomplete="off"></label>'+
       '<label class="setting"><span class="lbl">Contraseña de la liga</span><input class="input" type="password" id="conn-pw" autocomplete="current-password" data-enter="conn-change" data-fk="connpw"><span class="help">Es una sola contraseña, guardada en tu hoja de Google: la misma en todos tus dispositivos. Si la hoja es nueva, la que escribas aquí queda como contraseña.</span></label>'+
       '<label class="switch"><input type="checkbox" data-show="conn-pw"><span>Mostrar contraseña</span></label>'+
@@ -1638,6 +1640,12 @@ function handleAction(action,el){
           lsSet(API_KEY,api); lsSet(TOKEN_KEY,r.token);
           location.reload();
         }).catch(function(){toast('No se pudo conectar. Revisa que termine en /exec y que diga “Cualquier usuario”.');});
+      })(); break;
+    case 'copy-admin-link':
+      (function(){var i=document.getElementById('admin-link');if(!i) return;
+        var done=function(){toast('Link copiado');};
+        if(navigator.clipboard&&navigator.clipboard.writeText) navigator.clipboard.writeText(i.value).then(done,function(){i.select();document.execCommand('copy');done();});
+        else {i.select();document.execCommand('copy');done();}
       })(); break;
     case 'conn-remove':
       askConfirm({title:'Desconectar este dispositivo',body:'La app olvidará el link de Google en este navegador y te pedirá conectarla de nuevo. Los datos siguen guardados en tu hoja.',ok:'Desconectar',danger:true}).then(function(ok){

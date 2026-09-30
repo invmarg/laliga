@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Liga Relámpago</title>
+<title>Liga Caimanera · Admin</title>
 <link rel="manifest" href="manifest.webmanifest">
 <meta name="theme-color" content="#14482c">
 <meta name="mobile-web-app-capable" content="yes">
@@ -12,6 +12,17 @@
 <meta name="apple-mobile-web-app-title" content="Liga Admin">
 <link rel="apple-touch-icon" href="icons/admin-apple-touch-icon.png">
 <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
+<meta name="description" content="Administración de la Liga Caimanera.">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Liga Caimanera">
+<meta property="og:title" content="Liga Caimanera · Administración">
+<meta property="og:description" content="Administración de la Liga Caimanera.">
+<meta property="og:url" content="https://invmarg.github.io/laliga/">
+<meta property="og:image" content="https://invmarg.github.io/laliga/icons/share.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="robots" content="noindex">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%E2%9A%BD%3C/text%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -458,12 +469,12 @@ function seedState(){
     mk('t3','Real Cerveceros','#d97706',[['Alejandro Vega',1,'POR'],['Francisco Lara',5,'DEF'],['Gabriel Soto',8,'MED'],['Ricardo Flores',7,'DEL'],['Daniel Rojas',9,'DEL']]),
     mk('t4','Inter de Barrio','#2563eb',[['Santiago Cruz',1,'POR'],['Manuel Herrera',2,'DEF'],['Lucas Medina',10,'MED'],['Javier Ramos',7,'DEL'],['Bruno Vargas',9,'DEL']])
   ];
-  return {version:2,updatedAt:0,leagueName:'Liga Relámpago',format:'single',starters:5,playoffsEnabled:true,playoffsFormat:'semis_final',teams:teams,matches:roundRobin(teams,'single',false),playoffs:emptyPlayoffs()};
+  return {version:2,updatedAt:0,leagueName:'Liga Caimanera',format:'single',starters:5,playoffsEnabled:true,playoffsFormat:'semis_final',teams:teams,matches:roundRobin(teams,'single',false),playoffs:emptyPlayoffs()};
 }
 
 function normalize(raw){
   if(!raw||typeof raw!=='object'||!Array.isArray(raw.teams)) return null;
-  var s={version:2,updatedAt:+raw.updatedAt||0,leagueName:String(raw.leagueName||'Liga Relámpago').slice(0,60),
+  var s={version:2,updatedAt:+raw.updatedAt||0,leagueName:String(raw.leagueName||'Liga Caimanera').slice(0,60),
     format:raw.format==='double'?'double':'single',starters:Math.max(3,Math.min(11,parseInt(raw.starters,10)||5)),playoffsEnabled:raw.playoffsEnabled!==false,
     playoffsFormat:FORMATS.some(function(f){return f[0]===raw.playoffsFormat;})?raw.playoffsFormat:'semis_final'};
   s.teams=raw.teams.map(function(t,i){

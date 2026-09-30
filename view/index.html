@@ -357,9 +357,8 @@ textarea.input{min-height:120px;resize:vertical;line-height:1.4}
 <div id="dlg-root"></div>
 <div id="toast" class="toast" role="status" aria-live="polite"></div>
 <script>
-/* No hace falta tocar esto: el link de Google se pega en la app, en Configuración.
-   Si lo pegas aquí (termina en /exec), queda fijo para todos. */
-window.LIGA_API_URL = '';
+/* Link de la hoja de Google (queda fijo: la app instalada siempre sabe a qué hoja conectarse). */
+window.LIGA_API_URL = 'https://script.google.com/macros/s/AKfycbztJINxwHes5JYWCEr_SBlOM7W2SBpNSMqfpNWosQT_eZ9UithRvfcw-w3RD0aYmwRf/exec';
 window.LIGA_MODO = 'public'; /* Vista para compartir, sin contraseña — no cambies esta línea */
 </script>
 <script type="application/json" id="league-data">null</script>
@@ -732,6 +731,7 @@ function adminExtras(r){
   if(Array.isArray(r.novedades)) setNovedades(r.novedades);
   if(r.subs!=null) subsCount=r.subs;
   if(r.vapid&&gs) gs.vapid=r.vapid;
+  if(gs) gs.srv=Number(r.api)||0;
 }
 function gsLoaded(r){
   var n=normalize(r&&r.data?JSON.parse(r.data):null);
@@ -802,7 +802,7 @@ function pollNow(){
     if(!r) return;
     cacheSave(r);
     var before=maxNovId(), changed=r.ver&&r.ver!==gsVer&&!document.querySelector('dialog[open]');
-    if(changed) gsLoaded(r); else {setNovedades(r.novedades||novedades); if(r.vapid) gs.vapid=r.vapid;}
+    if(changed) gsLoaded(r); else {setNovedades(r.novedades||novedades); if(r.vapid) gs.vapid=r.vapid; gs.srv=Number(r.api)||0;}
     var fresh=novedades.filter(function(n){return n.id>before;});
     if(fresh.length&&before>0&&ui.tab!=='news') toast(fresh[0].titulo+(fresh[0].texto?'\n'+fresh[0].texto:''),5000);
     if(changed||fresh.length) render();
@@ -969,8 +969,10 @@ function openInstallHelp(){
 
 /* ---------- notificaciones ---------- */
 function pushSupported(){return 'serviceWorker' in navigator&&'PushManager' in window&&'Notification' in window;}
+function serverOld(){return !!gs&&!(gs.srv>=3||gs.vapid);}
 function notifState(){
   if(!viewOnly||!gs||!isHosted()) return 'none';
+  if(serverOld()) return 'server-old';
   if(pwa.ios&&!pwa.standalone) return 'ios-install';
   if(!pushSupported()||!gs.vapid) return 'unsupported';
   if(Notification.permission==='denied') return 'denied';
@@ -1033,10 +1035,22 @@ function renderNewsPanel(){
     off:['Activa las notificaciones para enterarte de goles, resultados y horarios al momento.','<button class="btn btn-primary" data-action="notif-on">'+ICON.bell+' Activar notificaciones</button>'],
     'ios-install':['En iPhone, las notificaciones funcionan con la app instalada. Agrégala a tu pantalla de inicio, ábrela desde el ícono y actívalas aquí.','<button class="btn btn-primary" data-action="install-help">Cómo instalarla</button>'],
     denied:['Las notificaciones están bloqueadas para esta página. Actívalas en los ajustes del navegador o del teléfono.',''],
-    unsupported:['Este navegador no permite notificaciones. Las novedades igual aparecen aquí.','']
+    unsupported:['Este navegador no permite notificaciones. Las novedades igual aparecen aquí.',''],
+    'server-old':['Las notificaciones todavía no están activas en esta liga. Las novedades igual aparecen aquí.','']
   }[ns];
   if(card) out+='<section class="panel notif-card"><p>'+card[0]+'</p>'+card[1]+'</section>';
-  if(isAdmin()&&gs){
+  if(isAdmin()&&gs&&serverOld()){
+    out+='<section class="panel danger"><h2>Falta actualizar la hoja de Google</h2><p class="help" style="margin-top:6px">La hoja todavía responde con el código anterior, por eso los avisos no se envían y los jugadores no ven el botón para activar notificaciones.</p>'+
+      '<ol class="steps" style="margin-top:12px"><li>En la hoja: <b>Extensiones → Apps Script</b>. Borra todo y pega el <b>Codigo.gs</b> nuevo. Guarda.</li>'+
+      '<li>Arriba, en la lista de funciones, elige <b>autorizar</b> y pulsa <b>▶ Ejecutar</b>. Acepta los permisos (Configuración avanzada → Ir a Liga → Permitir).</li>'+
+      '<li><b>Implementar → Gestionar implementaciones</b> → lápiz ✏️ → en Versión elige <b>Nueva versión</b> → <b>Implementar</b>.</li>'+
+      '<li>Vuelve aquí y pulsa <b>Comprobar</b>.</li></ol>'+
+      '<div class="btn-row" style="margin-top:12px"><button class="btn btn-primary" data-action="check-server">Comprobar</button></div></section>';
+  }
+  if(isAdmin()&&gs&&!serverOld()){
+    out+='<section class="panel notif-card"><p>Para recibir tú también las notificaciones, abre la vista de jugadores en tu teléfono y actívalas en su pestaña Novedades.</p><a class="btn" href="'+esc(publicLink())+'" target="_blank" rel="noopener">'+ICON.bell+' Abrir vista de jugadores</a></section>';
+  }
+  if(isAdmin()&&gs&&!serverOld()){
     out+='<section class="panel"><div class="panel-head"><div><h2>Enviar aviso</h2><p class="help">Los goles, resultados, horarios y la liguilla se avisan solos al guardarlos. Usa esto para avisos especiales, como un cambio de cancha o una suspensión.</p></div></div>'+
       '<label class="setting"><span class="lbl">Mensaje</span><textarea class="input" id="aviso-txt" maxlength="200" rows="3" style="min-height:0" placeholder="Ej.: La jornada 3 se pasa al domingo por lluvia." data-fk="avisotxt"></textarea></label>'+
       '<div class="btn-row" style="margin-top:12px;align-items:center"><button class="btn btn-primary" data-action="send-aviso">'+ICON.mega+' Enviar aviso</button>'+
@@ -1937,6 +1951,12 @@ function handleAction(action,el){
       else openInstallHelp();
       break;
     case 'install-help': openInstallHelp(); break;
+    case 'check-server':
+      gsCall('validar',gsToken).then(function(r){
+        if(r&&r.ok){adminExtras(r);render();toast(serverOld()?'La hoja sigue con el código anterior. Revisa que creaste una Nueva versión.':'¡Listo! La hoja está actualizada y las notificaciones funcionan.',5000);}
+        else if(r&&r.code==='auth') gsLogout('Tu sesión venció. Entra de nuevo.');
+        else toast('No se pudo comprobar. Intenta de nuevo.');
+      }).catch(function(){toast('No se pudo conectar con la hoja. Si acabas de dar permisos, espera un minuto e intenta otra vez.',5000);}); break;
     case 'notif-on': enableNotifs(); break;
     case 'notif-off': disableNotifs(); break;
     case 'bar-close': lsSet(BAR_KEY,String(Date.now())); render(); break;
@@ -1948,7 +1968,7 @@ function handleAction(action,el){
         gsCall('avisar',gsToken,'Aviso · '+state.leagueName,txt).then(function(r){
           if(r&&r.ok){adminExtras(r);render();toast(r.enviados?'Aviso enviado a '+r.enviados+(r.enviados===1?' teléfono':' teléfonos'):'Aviso publicado en Novedades');return;}
           if(r&&r.code==='auth'){gsLogout('Tu sesión venció. Entra de nuevo.');return;}
-          b.disabled=false; toast('No se pudo enviar el aviso');
+          b.disabled=false; toast(serverOld()?'La hoja tiene el código anterior. Revisa los pasos en Novedades.':'No se pudo enviar el aviso',4000);
         }).catch(function(){b.disabled=false;toast('No se pudo conectar. Revisa tu internet.');});
       })(); break;
     case 'copy-admin-link':

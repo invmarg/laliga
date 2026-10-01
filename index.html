@@ -282,6 +282,11 @@ tr.q3 td.pos::before{background:var(--muted)}
 .loan-add{border-top:1px dashed var(--line);padding-top:10px}
 .loan-row{display:flex;gap:8px;flex-wrap:wrap}
 .loan-row .input{flex:1 1 200px}
+.wild-team{border-top:1px dashed var(--line);padding-top:10px;display:grid;gap:8px}
+.wild-name{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.wchips{display:flex;flex-wrap:wrap;gap:6px}
+.wchip{display:inline-flex;align-items:center;gap:2px;padding:2px 2px 2px 10px;border-radius:999px;background:var(--amber);color:var(--amber-ink);font-weight:600;font-size:.9rem}
+.wchip .icon-btn{width:30px;height:30px;color:inherit}
 .roster td.b{width:74px;text-align:center}
 .base-chk{display:inline-flex;align-items:center;gap:5px;font-size:.8rem;font-weight:600;color:var(--muted);cursor:pointer}
 .base-chk input{width:18px;height:18px;accent-color:var(--turf)}
@@ -439,7 +444,7 @@ function randomColor(){var c=['#1f9d55','#e11d48','#d97706','#2563eb','#7c3aed',
 
 /* ---------- datos ---------- */
 function emptyMatch(extra){
-  var m={homeId:null,awayId:null,homeScore:0,awayScore:0,homePens:null,awayPens:null,status:'pending',date:'',time:'',venue:'',events:[],lineups:{}};
+  var m={homeId:null,awayId:null,homeScore:0,awayScore:0,homePens:null,awayPens:null,status:'pending',date:'',time:'',venue:'',events:[],lineups:{},wildOn:false,wild:{}};
   for(var k in (extra||{})) m[k]=extra[k];
   return m;
 }
@@ -474,7 +479,7 @@ function seedState(){
     mk('t3','Real Cerveceros','#d97706',[['Alejandro Vega',1,'POR'],['Francisco Lara',5,'DEF'],['Gabriel Soto',8,'MED'],['Ricardo Flores',7,'DEL'],['Daniel Rojas',9,'DEL']]),
     mk('t4','Inter de Barrio','#2563eb',[['Santiago Cruz',1,'POR'],['Manuel Herrera',2,'DEF'],['Lucas Medina',10,'MED'],['Javier Ramos',7,'DEL'],['Bruno Vargas',9,'DEL']])
   ];
-  return {version:2,updatedAt:0,leagueName:'Liga Caimanera',format:'single',starters:5,playoffsEnabled:true,playoffsFormat:'semis_final',teams:teams,matches:roundRobin(teams,'single',false),playoffs:emptyPlayoffs()};
+  return {version:2,updatedAt:0,leagueName:'Liga Caimanera',format:'single',starters:5,playoffsEnabled:true,playoffsFormat:'semis_final',teams:teams,comodines:[],matches:roundRobin(teams,'single',false),playoffs:emptyPlayoffs()};
 }
 
 function normalize(raw){
@@ -488,8 +493,11 @@ function normalize(raw){
     return {id:id,name:String(t.name||'Equipo '+(i+1)).slice(0,40),color:/^#[0-9a-f]{6}$/i.test(t.color)?t.color:'#1f9d55',
       players:pl.map(function(p,j){
         if(typeof p==='string') return {id:id+'p'+(j+1)+uid('-'),name:p,number:'',pos:'',base:false};
-        return {id:String(p.id||uid('p')),name:String(p.name||'Jugador').slice(0,40),number:p.number==null?'':String(p.number).replace(/\D/g,'').slice(0,3),pos:POSITIONS[p.pos]?p.pos:'',base:!!p.base&&!p.comodin,comodin:!!p.comodin};
+        return {id:String(p.id||uid('p')),name:String(p.name||'Jugador').slice(0,40),number:p.number==null?'':String(p.number).replace(/\D/g,'').slice(0,3),pos:POSITIONS[p.pos]?p.pos:'',base:!!p.base};
       })};
+  });
+  s.comodines=(Array.isArray(raw.comodines)?raw.comodines:[]).filter(function(p){return p&&typeof p==='object';}).map(function(p){
+    return {id:String(p.id||uid('w')),name:String(p.name||'Comodín').slice(0,40),number:p.number==null?'':String(p.number).replace(/\D/g,'').slice(0,3),pos:POSITIONS[p.pos]?p.pos:'',comodin:true};
   });
   function tid(v){return v==null||v===''?null:String(v);}
   function num(v){var n=parseInt(v,10);return isNaN(n)?0:Math.max(0,Math.min(99,n));}
@@ -510,6 +518,10 @@ function normalize(raw){
       var ls=ids(l.starters), lb=ids(l.subs); seen={};
       e.lineups[k]={starters:ls,subs:lb,loans:ids(l.loans)};
     });
+    e.wildOn=!!m.wildOn; e.wild={};
+    if(m.wild&&typeof m.wild==='object'){var used={};Object.keys(m.wild).forEach(function(k){
+      e.wild[k]=(Array.isArray(m.wild[k])?m.wild[k]:[]).map(String).filter(function(x){if(used[x]) return false;used[x]=1;return true;}).slice(0,2);
+    });}
     e.events=(Array.isArray(m.events)?m.events:[]).filter(function(ev){return ev&&['goal','yellow','red'].indexOf(ev.type)>=0;}).map(function(ev){
       return {id:String(ev.id||uid('e')),type:ev.type,teamId:tid(ev.teamId),playerId:ev.playerId?String(ev.playerId):null,playerName:String(ev.playerName||'')};
     });
@@ -531,13 +543,19 @@ function allMatchObjs(s){return s.matches.concat(KO_KEYS.map(function(k){return 
 
 function teamById(id){return state.teams.find(function(t){return t.id===id;})||null;}
 function teamName(id){var t=teamById(id);return t?t.name:'Por definir';}
-function playerOf(tid,pid){var t=teamById(tid);return t&&pid?t.players.find(function(p){return p.id===pid;})||null:null;}
+function playerOf(tid,pid){var t=rosterTeam(tid);return t&&pid?t.players.find(function(p){return p.id===pid;})||null:null;}
 function playerById(pid){
   if(!pid) return null;
   for(var i=0;i<state.teams.length;i++){var t=state.teams[i];for(var j=0;j<t.players.length;j++) if(t.players[j].id===pid) return {p:t.players[j],t:t};}
-  return null;
+  var w=(state.comodines||[]).find(function(p){return p.id===pid;});
+  return w?{p:w,t:null,wild:true}:null;
 }
-function homeTeamOf(pid){var r=playerById(pid);return r?r.t.id:null;}
+function homeTeamOf(pid){var r=playerById(pid);return r&&r.t?r.t.id:null;}
+function teamLabel(id){return id?teamName(id):'Comodín';}
+function wildTeam(){return {id:'wild',name:'Comodines',players:state.comodines||(state.comodines=[])};}
+function rosterTeam(id){return id==='wild'?wildTeam():teamById(id);}
+function wildOf(m,tid){return m&&m.wildOn&&m.wild&&tid?(m.wild[tid]||[]).filter(function(id){var r=playerById(id);return r&&r.wild;}):[];}
+function wildTeamOf(m,pid){var out=null;if(m&&m.wildOn&&m.wild) Object.keys(m.wild).forEach(function(k){if((m.wild[k]||[]).indexOf(pid)>=0) out=k;});return out;}
 function evName(e){var r=playerById(e.playerId);return r?r.p.name:(e.playerName||'Jugador');}
 function playersSorted(t){
   return t.players.slice().sort(function(a,b){
@@ -575,7 +593,7 @@ function computeStats(){
   function scan(m){m.events.forEach(function(ev){
     if(!ids[ev.teamId]) return;
     var found=playerById(ev.playerId), key=found?ev.playerId:('n:'+ev.teamId+':'+ev.playerName);
-    if(!map[key]){var p=found&&found.p;map[key]={key:key,name:p?p.name:ev.playerName,number:p?p.number:'',pos:p?p.pos:'',comodin:!!(p&&p.comodin),teamId:found?found.t.id:ev.teamId,goals:0,yellows:0,reds:0,loanGoals:{}};}
+    if(!map[key]){var p=found&&found.p;map[key]={key:key,name:p?p.name:ev.playerName,number:p?p.number:'',pos:p?p.pos:'',comodin:!!(found&&found.wild),teamId:found?(found.t?found.t.id:null):ev.teamId,goals:0,yellows:0,reds:0,loanGoals:{}};}
     var r=map[key]; if(ev.type==='goal') r.goals++; else if(ev.type==='yellow') r.yellows++; else r.reds++;
     if(ev.type==='goal'&&ev.teamId!==r.teamId) r.loanGoals[ev.teamId]=(r.loanGoals[ev.teamId]||0)+1;
   });}
@@ -646,26 +664,24 @@ function phaseText(){
   return 'Jornada '+cur+' de '+maxMd+(lm.some(function(m){return m.status==='live';})?', con partidos en vivo':'');
 }
 function setStatus(m,s){m.status=s;if(s!=='pending'){if(!m.date) m.date=todayISO();ensureLineups(m);}}
-function comodinOf(tid){var t=teamById(tid);return t?t.players.find(function(p){return p.comodin;})||null:null;}
 function baseIds(tid){
   var t=teamById(tid); if(!t) return [];
-  var b=t.players.filter(function(p){return p.base&&!p.comodin;}).map(function(p){return p.id;});
-  var c=comodinOf(tid); if(b.length&&c) b.push(c.id);
-  return b;
+  return t.players.filter(function(p){return p.base;}).map(function(p){return p.id;});
 }
-function ensureLineups(m){[m.homeId,m.awayId].forEach(function(tid){if(!tid||!teamById(tid)||m.lineups[tid]) return;var b=baseIds(tid);if(b.length) m.lineups[tid]={starters:b,subs:[],loans:[]};});}
+function ensureLineups(m){[m.homeId,m.awayId].forEach(function(tid){if(!tid||!teamById(tid)||m.lineups[tid]) return;var b=baseIds(tid),w=wildOf(m,tid);if(b.length) m.lineups[tid]={starters:b.concat(w.slice(0,1)),subs:w.slice(1),loans:[]};});}
 function lineupOf(m,tid){
   var l=m.lineups&&m.lineups[tid], t=teamById(tid); if(!l||!t) return null;
-  var loans=(l.loans||[]).filter(function(id){var r=playerById(id);return r&&r.t.id!==tid;});
-  function ok(id){return t.players.some(function(p){return p.id===id;})||loans.indexOf(id)>=0;}
-  return {starters:l.starters.filter(ok),subs:l.subs.filter(ok),loans:loans};
+  var loans=(l.loans||[]).filter(function(id){var r=playerById(id);return r&&r.t&&r.t.id!==tid;});
+  var wild=wildOf(m,tid);
+  function ok(id){return t.players.some(function(p){return p.id===id;})||loans.indexOf(id)>=0||wild.indexOf(id)>=0;}
+  return {starters:l.starters.filter(ok),subs:l.subs.filter(ok),loans:loans,wild:wild};
 }
 function loanedTo(m,pid,exceptTid){
   var out=null;
   [m.homeId,m.awayId].forEach(function(tid){if(tid&&tid!==exceptTid&&m.lineups[tid]&&(m.lineups[tid].loans||[]).indexOf(pid)>=0) out=tid;});
   return out;
 }
-function expectedStarters(l){var n=state.starters;if(l) l.starters.forEach(function(id){var r=playerById(id);if(r&&r.p.comodin) n++;});return n;}
+function expectedStarters(m){return state.starters+(m&&m.wildOn?1:0);}
 function markPlayed(m,tid,pid){var l=m.lineups[tid];if(l&&l.starters.indexOf(pid)<0&&l.subs.indexOf(pid)<0) l.subs.push(pid);}
 
 /* ---------- guardado y publicación ---------- */
@@ -743,7 +759,7 @@ function gsTables(){
   state.matches.forEach(function(m){row('Fase regular','Jornada '+m.matchday,m);});
   if(state.playoffsEnabled){var L=koLabels();KO_KEYS.forEach(function(k){var m=state.playoffs[k];if(m.homeId||m.awayId) row('Liguilla',L[k][0],m);});}
   var gol=[['#','Jugador','Equipo','Goles','Amarillas','Rojas']];
-  computeStats().sort(function(a,b){return b.goals-a.goals||a.name.localeCompare(b.name);}).forEach(function(x,i){gol.push([i+1,x.name,teamName(x.teamId),x.goals,x.yellows,x.reds]);});
+  computeStats().sort(function(a,b){return b.goals-a.goals||a.name.localeCompare(b.name);}).forEach(function(x,i){gol.push([i+1,x.name,teamLabel(x.teamId),x.goals,x.yellows,x.reds]);});
   return {Posiciones:pos,Partidos:par,Goleadores:gol};
 }
 function gsSave(force){
@@ -1112,7 +1128,7 @@ function render(){
   var fk=forceFocus||focusKey(); forceFocus=null;
   if(needSetup){document.title=state.leagueName;appEl.innerHTML=renderSetup();restoreFocus(fk||'setupurl');return;}
   if((gs||viewOnly)&&(gsLoading||gsLoadErr)){
-    appEl.innerHTML='<header class="masthead">'+ICON.pitch+'<div class="wrap mast-inner"><div class="mast-title"><h1>'+(gsLoadErr==='noapi'?'Liga sin conectar':gsLoadErr?'Sin conexión':'Cargando…')+'</h1><p class="mast-sub">'+(gsLoadErr==='noapi'?'Abre el link de la liga que te compartieron para conectarla.':gsLoadErr?'No se pudo cargar la liga. Revisa tu internet.':'Trayendo la liga desde Google Sheets')+'</p></div></div></header>'+
+    appEl.innerHTML='<header class="masthead">'+ICON.pitch+'<div class="wrap mast-inner"><div class="mast-title"><h1>'+(gsLoadErr==='noapi'?'Liga sin conectar':gsLoadErr?'Sin conexión':'Cargando…')+'</h1><p class="mast-sub">'+(gsLoadErr==='noapi'?'Abre el link de la liga que te compartieron para conectarla.':gsLoadErr?'No se pudo cargar la liga. Revisa tu internet.':'Trayendo la liga')+'</p></div></div></header>'+
       (gsLoadErr&&gsLoadErr!=='noapi'?'<main class="wrap main"><button class="btn btn-primary" data-action="reload-page">Reintentar</button></main>':'');
     return;
   }
@@ -1229,7 +1245,7 @@ function lineupSummary(m){
   if(!teamById(m.homeId)||!teamById(m.awayId)) return '';
   var lh=lineupOf(m,m.homeId), la=lineupOf(m,m.awayId); if(!lh&&!la) return '';
   function names(tid,ids){return ids.map(function(id){var r=playerById(id);if(!r) return '';var p=r.p;
-    return '<li>'+(p.number!==''?'#'+esc(p.number)+' ':'')+esc(p.name)+(r.t.id!==tid?' <small>(prestado de '+esc(r.t.name)+')</small>':p.comodin?' <small>(comodín)</small>':'')+'</li>';}).join('');}
+    return '<li>'+(p.number!==''?'#'+esc(p.number)+' ':'')+esc(p.name)+(r.wild?' <small>(comodín)</small>':r.t.id!==tid?' <small>(prestado de '+esc(r.t.name)+')</small>':'')+'</li>';}).join('');}
   function col(tid,l){if(!l) return '<div><p>Sin alineación</p></div>';
     return '<div><p>Titulares</p><ul>'+(names(tid,l.starters)||'<li class="muted">–</li>')+'</ul>'+(l.subs.length?'<p>Entraron</p><ul>'+names(tid,l.subs)+'</ul>':'')+'</div>';}
   return '<details class="lineups"><summary>Alineaciones</summary><div class="lu-cols">'+col(m.homeId,lh)+col(m.awayId,la)+'</div></details>';
@@ -1255,7 +1271,7 @@ function matchCard(m,o){
   }
   return '<article class="match '+(m.status==='live'?'live ':'')+(o.cls||'')+'">'+
     (o.label?'<div class="ko-label">'+esc(o.label)+(o.sub?'<small>'+esc(o.sub)+'</small>':'')+'</div>':'')+
-    '<div class="match-meta"><div class="when">'+(w.length?w.map(function(x){return '<span>'+esc(x)+'</span>';}).join(''):'<span>Sin fecha</span>')+'</div>'+badge(m.status)+'</div>'+
+    '<div class="match-meta"><div class="when">'+(w.length?w.map(function(x){return '<span>'+esc(x)+'</span>';}).join(''):'<span>Sin fecha</span>')+(m.wildOn?'<span class="tag-c" style="margin-left:0">Con comodines</span>':'')+'</div>'+badge(m.status)+'</div>'+
     '<div class="match-row">'+sideH+plate+sideA+'</div>'+pens+warn+eventsSummary(m)+lineupSummary(m)+actions+'</article>';
 }
 function renderMatchesPanel(){
@@ -1302,6 +1318,7 @@ function playerCell(s,extra){
 }
 function loanNote(x){
   var ks=Object.keys(x.loanGoals||{}); if(!ks.length) return '';
+  if(x.comodin) return ks.map(function(k){var n=x.loanGoals[k];return n+(n===1?' gol':' goles')+' con '+esc(teamName(k));}).join(', ');
   return ks.map(function(k){var n=x.loanGoals[k];return n+(n===1?' gol':' goles')+' prestado a '+esc(teamName(k));}).join(', ');
 }
 function playedMatches(){
@@ -1328,7 +1345,7 @@ function participation(){
   var r={};
   playedMatches().forEach(function(m){[m.homeId,m.awayId].forEach(function(tid){
     var l=lineupOf(m,tid); if(!l) return;
-    function g(id){return r[id]||(r[id]={id:id,teamId:homeTeamOf(id)||tid,pj:0,tit:0,sup:0,pres:0});}
+    function g(id){var q=playerById(id);return r[id]||(r[id]={id:id,teamId:q&&q.wild?null:(homeTeamOf(id)||tid),pj:0,tit:0,sup:0,pres:0});}
     l.starters.concat(l.subs).forEach(function(id){if(homeTeamOf(id)&&homeTeamOf(id)!==tid) g(id).pres++;});
     l.starters.forEach(function(id){var x=g(id);x.pj++;x.tit++;});
     l.subs.forEach(function(id){var x=g(id);x.pj++;x.sup++;});
@@ -1341,7 +1358,7 @@ function keeperStats(){
     var tid=x[0], gc=x[1], l=lineupOf(m,tid); if(!l) return;
     var gk=null; l.starters.some(function(id){var q=playerById(id);if(q&&q.p.pos==='POR'){gk=q.p;return true;}return false;});
     if(!gk) return;
-    var k=r[gk.id]||(r[gk.id]={id:gk.id,teamId:homeTeamOf(gk.id)||tid,pj:0,gc:0,cs:0}); k.pj++; k.gc+=gc; if(!gc) k.cs++;
+    var k=r[gk.id]||(r[gk.id]={id:gk.id,teamId:gk.comodin?null:(homeTeamOf(gk.id)||tid),pj:0,gc:0,cs:0}); k.pj++; k.gc+=gc; if(!gc) k.cs++;
   });});
   return Object.keys(r).map(function(k){var x=r[k];x.avg=x.gc/x.pj;return x;})
     .sort(function(a,b){return a.avg-b.avg||b.cs-a.cs||b.pj-a.pj;});
@@ -1356,9 +1373,9 @@ function renderLineupStats(){
   var pl=Object.keys(part).map(function(k){var x=part[k];var q=playerById(x.id);return q?{x:x,p:q.p}:null;}).filter(Boolean)
     .sort(function(a,b){return b.x.pj-a.x.pj||b.x.tit-a.x.tit||a.p.name.localeCompare(b.p.name);});
   var kRows=ks.length?ks.map(function(k,i){var q=playerById(k.id),p=q?q.p:{name:'Jugador',number:'',pos:''};
-    return '<tr><td class="rank">'+(i+1)+'</td><td>'+playerCell(p)+'</td><td class="muted">'+esc(teamName(k.teamId))+'</td><td class="num">'+k.pj+'</td><td class="num big">'+k.gc+'</td><td class="num">'+k.avg.toFixed(1).replace('.',',')+'</td><td class="num">'+k.cs+'</td></tr>';}).join('')
+    return '<tr><td class="rank">'+(i+1)+'</td><td>'+playerCell(p)+'</td><td class="muted">'+esc(teamLabel(k.teamId))+'</td><td class="num">'+k.pj+'</td><td class="num big">'+k.gc+'</td><td class="num">'+k.avg.toFixed(1).replace('.',',')+'</td><td class="num">'+k.cs+'</td></tr>';}).join('')
     :'<tr><td colspan="7" class="muted" style="text-align:center;padding:18px">Aparece cuando un partido finalizado tenga alineación con un titular en posición Portero.</td></tr>';
-  var pRows=pl.length?pl.map(function(o){return '<tr><td>'+playerCell(o.p,o.x.pres?(o.x.pres===1?'1 partido prestado':o.x.pres+' partidos prestado'):'')+'</td><td class="muted">'+esc(teamName(o.x.teamId))+'</td><td class="num big">'+o.x.pj+'</td><td class="num">'+o.x.tit+'</td><td class="num">'+o.x.sup+'</td></tr>';}).join('')
+  var pRows=pl.length?pl.map(function(o){return '<tr><td>'+playerCell(o.p,o.x.pres?(o.x.pres===1?'1 partido prestado':o.x.pres+' partidos prestado'):'')+'</td><td class="muted">'+esc(teamLabel(o.x.teamId))+'</td><td class="num big">'+o.x.pj+'</td><td class="num">'+o.x.tit+'</td><td class="num">'+o.x.sup+'</td></tr>';}).join('')
     :'<tr><td colspan="5" class="muted" style="text-align:center;padding:18px">Aparece cuando cargues alineaciones en partidos finalizados.</td></tr>';
   return '<div class="two" style="margin-top:16px"><section class="panel"><div class="panel-head"><div><h2>Porteros</h2><p class="help">Goles recibidos por el portero que arrancó cada partido.</p></div></div>'+
     '<div class="table-scroll"><table class="list-table"><thead><tr><th>#</th><th>Portero</th><th>Equipo</th><th class="num">PJ</th><th class="num">GC</th><th class="num">Prom.</th><th class="num">Invicta</th></tr></thead><tbody>'+kRows+'</tbody></table></div></section>'+
@@ -1381,9 +1398,9 @@ function renderTeamStats(){
 function renderStatsPanel(){
   var s=computeStats(), g=scorersList(s);
   var c=s.filter(function(x){return x.yellows||x.reds;}).sort(function(a,b){return (b.reds*3+b.yellows)-(a.reds*3+a.yellows)||a.name.localeCompare(b.name);});
-  var gRows=g.length?g.map(function(x,i){return '<tr><td class="rank">'+(i+1)+'</td><td>'+playerCell(x,loanNote(x))+'</td><td class="muted">'+esc(teamName(x.teamId))+'</td><td class="num big">'+x.goals+'</td></tr>';}).join('')
+  var gRows=g.length?g.map(function(x,i){return '<tr><td class="rank">'+(i+1)+'</td><td>'+playerCell(x,loanNote(x))+'</td><td class="muted">'+esc(teamLabel(x.teamId))+'</td><td class="num big">'+x.goals+'</td></tr>';}).join('')
     :'<tr><td colspan="4" class="muted" style="text-align:center;padding:18px">Todavía no hay goles registrados.</td></tr>';
-  var cRows=c.length?c.map(function(x){return '<tr><td>'+playerCell(x)+'</td><td class="muted">'+esc(teamName(x.teamId))+'</td><td class="num">'+x.yellows+'</td><td class="num">'+x.reds+'</td></tr>';}).join('')
+  var cRows=c.length?c.map(function(x){return '<tr><td>'+playerCell(x)+'</td><td class="muted">'+esc(teamLabel(x.teamId))+'</td><td class="num">'+x.yellows+'</td><td class="num">'+x.reds+'</td></tr>';}).join('')
     :'<tr><td colspan="4" class="muted" style="text-align:center;padding:18px">Todavía no hay tarjetas.</td></tr>';
   return '<div class="two"><section class="panel"><div class="panel-head"><h2>Goleadores</h2></div><div class="table-scroll"><table class="list-table"><thead><tr><th>#</th><th>Jugador</th><th>Equipo</th><th class="num">Goles</th></tr></thead><tbody>'+gRows+'</tbody></table></div></section>'+
     '<section class="panel"><div class="panel-head"><h2>Tarjetas</h2></div><div class="table-scroll"><table class="list-table"><thead><tr><th>Jugador</th><th>Equipo</th><th class="num"><span class="chip-card yellow" title="Amarillas"></span></th><th class="num"><span class="chip-card red" title="Rojas"></span></th></tr></thead><tbody>'+cRows+'</tbody></table></div></section></div>'+
@@ -1403,11 +1420,13 @@ function renderTeamsPanel(){
         (function(){
           if(!pl.length) return '<p class="help">Plantilla sin cargar.</p>';
           var li=function(arr){return '<ul class="roster-ro">'+arr.map(function(p){return '<li>'+playerCell(p)+'</li>';}).join('')+'</ul>';};
-          var b=pl.filter(function(p){return p.base&&!p.comodin;}), c=pl.filter(function(p){return p.comodin;}), r=pl.filter(function(p){return !p.base&&!p.comodin;});
-          if(!b.length&&!c.length) return li(pl);
-          return (b.length?'<p class="roster-group">Titulares</p>'+li(b):'')+(c.length?'<p class="roster-group">Comodín</p>'+li(c):'')+(r.length?'<p class="roster-group">Suplentes</p>'+li(r):'');
+          var b=pl.filter(function(p){return p.base;}), r=pl.filter(function(p){return !p.base;});
+          if(!b.length) return li(pl);
+          return '<p class="roster-group">Titulares</p>'+li(b)+(r.length?'<p class="roster-group">Suplentes</p>'+li(r):'');
         })()+'</section>';
-    }).join('')+'</div>';
+    }).join('')+
+    (state.comodines&&state.comodines.length?'<section class="panel team-card" style="--tc:#d97706"><div class="team-head-ro"><h3>Comodines</h3></div><p class="help">Jugadores extra. En los partidos con comodines cada equipo lleva al menos uno y juegan '+(state.starters+1)+' contra '+(state.starters+1)+'.</p><ul class="roster-ro">'+playersSorted(wildTeam()).map(function(p){return '<li>'+playerCell(p)+'</li>';}).join('')+'</ul></section>':'')+
+    '</div>';
   }
   var cards=state.teams.map(function(t){
     var rows=t.players.map(function(p){
@@ -1416,7 +1435,7 @@ function renderTeamsPanel(){
         '<td><input class="input" maxlength="40" value="'+esc(p.name)+'" data-change="p-name"'+d+' data-fk="pm-'+p.id+'" aria-label="Nombre del jugador"></td>'+
         '<td class="p"><select class="input" data-change="p-pos"'+d+' data-fk="pp-'+p.id+'" aria-label="Posición de '+esc(p.name)+'">'+posOptions(p.pos)+'</select></td>'+
         '<td class="p"><select class="input" data-change="p-role"'+d+' data-fk="pr-'+p.id+'" aria-label="Rol de '+esc(p.name)+'">'+
-          [['sub','Suplente'],['base','Titular'],['comodin','Comodín']].map(function(o){var cur=p.comodin?'comodin':p.base?'base':'sub';return '<option value="'+o[0]+'"'+(cur===o[0]?' selected':'')+'>'+o[1]+'</option>';}).join('')+'</select></td>'+
+          [['sub','Suplente'],['base','Titular']].map(function(o){var cur=p.base?'base':'sub';return '<option value="'+o[0]+'"'+(cur===o[0]?' selected':'')+'>'+o[1]+'</option>';}).join('')+'</select></td>'+
         '<td class="x"><button class="icon-btn" data-action="remove-player"'+d+' aria-label="Quitar a '+esc(p.name)+'">'+ICON.trash+'</button></td></tr>';
     }).join('');
     return '<section class="panel team-card" style="--tc:'+t.color+'"><div class="te-head">'+
@@ -1424,12 +1443,26 @@ function renderTeamsPanel(){
       '<input class="input te-name" maxlength="40" value="'+esc(t.name)+'" data-change="team-name" data-id="'+t.id+'" data-fk="tn-'+t.id+'" aria-label="Nombre del equipo">'+
       '<button class="btn btn-sm" data-action="team" data-id="'+t.id+'">Ficha</button>'+
       (state.teams.length>2?'<button class="icon-btn" data-action="remove-team" data-id="'+t.id+'" aria-label="Eliminar '+esc(t.name)+'">'+ICON.trash+'</button>':'')+'</div>'+
-      (rows?(function(){var nb=t.players.filter(function(p){return p.base&&!p.comodin;}).length, c=comodinOf(t.id);return '<p class="count-note'+(nb!==state.starters?' bad':'')+'">Titulares base: '+nb+' de '+state.starters+' · '+(c?'Comodín: '+esc(c.name)+' (juegan '+(state.starters+1)+' contra '+(state.starters+1)+')':'Sin comodín')+'</p>';})()+'<table class="roster"><thead><tr><th>N°</th><th>Nombre</th><th>Posición</th><th>Rol</th><th></th></tr></thead><tbody>'+rows+'</tbody></table>':'<p class="help">Aún no hay jugadores.</p>')+
+      (rows?(function(){var nb=t.players.filter(function(p){return p.base;}).length;return '<p class="count-note'+(nb!==state.starters?' bad':'')+'">Titulares base: '+nb+' de '+state.starters+'</p>';})()+'<table class="roster"><thead><tr><th>N°</th><th>Nombre</th><th>Posición</th><th>Rol</th><th></th></tr></thead><tbody>'+rows+'</tbody></table>':'<p class="help">Aún no hay jugadores.</p>')+
       '<div class="addrow"><input class="input" id="np-num-'+t.id+'" placeholder="N°" inputmode="numeric" maxlength="3" aria-label="Número del nuevo jugador" data-fk="npn-'+t.id+'">'+
       '<input class="input" id="np-name-'+t.id+'" placeholder="Nombre del jugador" maxlength="40" data-enter="add-player" data-team="'+t.id+'" data-fk="npname-'+t.id+'" aria-label="Nombre del nuevo jugador">'+
       '<select class="input" id="np-pos-'+t.id+'" aria-label="Posición del nuevo jugador">'+posOptions('')+'</select>'+
       '<button class="btn btn-sm" data-action="add-player" data-team="'+t.id+'">Añadir</button></div></section>';
   }).join('');
+  var wt=wildTeam(), wrows=wt.players.map(function(p){
+      var d=' data-team="wild" data-player="'+p.id+'"';
+      return '<tr><td class="n"><input class="input" inputmode="numeric" maxlength="3" value="'+esc(p.number)+'" data-change="p-number"'+d+' data-fk="pn-'+p.id+'" aria-label="Número de '+esc(p.name)+'"></td>'+
+        '<td><input class="input" maxlength="40" value="'+esc(p.name)+'" data-change="p-name"'+d+' data-fk="pm-'+p.id+'" aria-label="Nombre del comodín"></td>'+
+        '<td class="p"><select class="input" data-change="p-pos"'+d+' data-fk="pp-'+p.id+'" aria-label="Posición de '+esc(p.name)+'">'+posOptions(p.pos)+'</select></td>'+
+        '<td class="x"><button class="icon-btn" data-action="remove-player"'+d+' aria-label="Quitar a '+esc(p.name)+'">'+ICON.trash+'</button></td></tr>';
+    }).join('');
+  cards+='<section class="panel team-card" style="--tc:#d97706"><div class="te-head"><h3 style="margin:0;flex:1">Comodines</h3></div>'+
+    '<p class="help">Jugadores extra que no son de ningún equipo. En cada partido activas “Partido con comodines” y eliges a qué equipo va cada uno: mínimo 1 y máximo 2 por equipo, para jugar '+(state.starters+1)+' contra '+(state.starters+1)+'.</p>'+
+    (wrows?'<table class="roster"><thead><tr><th>N°</th><th>Nombre</th><th>Posición</th><th></th></tr></thead><tbody>'+wrows+'</tbody></table>':'<p class="help">Aún no hay comodines.</p>')+
+    '<div class="addrow"><input class="input" id="np-num-wild" placeholder="N°" inputmode="numeric" maxlength="3" aria-label="Número del nuevo comodín" data-fk="npn-wild">'+
+    '<input class="input" id="np-name-wild" placeholder="Nombre del comodín" maxlength="40" data-enter="add-player" data-team="wild" data-fk="npname-wild" aria-label="Nombre del nuevo comodín">'+
+    '<select class="input" id="np-pos-wild" aria-label="Posición del nuevo comodín">'+posOptions('')+'</select>'+
+    '<button class="btn btn-sm" data-action="add-player" data-team="wild">Añadir</button></div></section>';
   return '<section class="panel"><div class="panel-head" style="margin-bottom:0"><div><h2>Equipos y plantillas</h2><p class="help">Los cambios de nombre, color y jugadores no afectan el calendario.</p></div><button class="btn btn-primary" data-action="add-team">Añadir equipo</button></div></section>'+
     '<div class="two" style="margin-top:16px">'+cards+'</div>';
 }
@@ -1442,7 +1475,7 @@ function renderConfigPanel(){
   var general='<section class="panel"><h2>General</h2>'+
       '<label class="setting"><span class="lbl">Nombre de la liga</span><input class="input" maxlength="60" value="'+esc(state.leagueName)+'" data-change="league-name" data-fk="cfgname"></label>'+
       '<label class="setting"><span class="lbl">Fase regular</span><select class="input" data-change="format" data-fk="cfgfmt"><option value="single"'+(state.format==='single'?' selected':'')+'>Solo ida</option><option value="double"'+(state.format==='double'?' selected':'')+'>Ida y vuelta</option></select><span class="help">Cambiarla rehace el calendario.</span></label>'+
-      '<label class="setting"><span class="lbl">Jugadores en cancha por equipo</span><input class="input" type="number" min="3" max="11" inputmode="numeric" value="'+state.starters+'" data-change="starters" data-fk="cfgst" style="max-width:120px"><span class="help">Se usa para revisar las alineaciones. Fútbol sala: 5. Si un equipo tiene comodín, juega uno más (6 contra 6).</span></label>'+
+      '<label class="setting"><span class="lbl">Jugadores en cancha por equipo</span><input class="input" type="number" min="3" max="11" inputmode="numeric" value="'+state.starters+'" data-change="starters" data-fk="cfgst" style="max-width:120px"><span class="help">Se usa para revisar las alineaciones. Fútbol sala: 5. En los partidos con comodines cada equipo juega con uno más (6 contra 6).</span></label>'+
       '<label class="switch"><input type="checkbox" data-change="playoffs-enabled" data-fk="cfgko"'+(state.playoffsEnabled?' checked':'')+'><span>Jugar liguilla al terminar la fase regular</span></label>'+
     '</section>';
   var vista='<section class="panel"><h2>Vista pública</h2><p class="help">'+(gs?'Comparte el link de la liga por WhatsApp. Quien lo abra ve tabla, partidos, liguilla, estadísticas y plantillas sin clave y sin poder cambiar nada. Se actualiza sola cada vez que guardas.':localMode?'Comparte la liga tal como está ahora en modo solo lectura. En el celular se abre el menú de compartir (WhatsApp, Telegram, correo); en la computadora se descarga el archivo para que lo envíes. Los jugadores lo abren en el celular y ven tabla, partidos, liguilla, estadísticas y plantillas, sin poder cambiar nada. Cuando haya resultados nuevos, compártela otra vez.':'Quien abra el link sin permiso de edición ve la liga en modo lectura, sin botones para cambiar nada. Los cambios que hagas aquí se publican solos unos segundos después.')+'</p>'+
@@ -1573,7 +1606,8 @@ function matchDialogHtml(st){
   else {
     var evTeam=(st.evTeam===m.homeId||st.evTeam===m.awayId)?st.evTeam:m.homeId;
     var evL=lineupOf(m,evTeam);
-    var players=playersSorted(teamById(evTeam)).filter(function(p){return !loanedTo(m,p.id,evTeam);}).concat((evL?evL.loans:[]).map(function(id){var r=playerById(id);return r?{id:r.p.id,name:r.p.name,number:r.p.number,loanFrom:r.t.name}:null;}).filter(Boolean));
+    var players=playersSorted(teamById(evTeam)).filter(function(p){return !loanedTo(m,p.id,evTeam);}).concat((evL?evL.loans:[]).map(function(id){var r=playerById(id);return r&&r.t?{id:r.p.id,name:r.p.name,number:r.p.number,loanFrom:r.t.name}:null;}).filter(Boolean))
+      .concat(wildOf(m,evTeam).map(function(id){var r=playerById(id);return r?{id:r.p.id,name:r.p.name,number:r.p.number,comodin:true}:null;}).filter(Boolean));
     rec='<div class="recorder"><span class="lbl">Registrar gol o tarjeta</span><div class="fields2">'+
       '<label class="setting"><span class="help">Equipo</span><select class="input" data-change="ev-team" data-fk="evt">'+[h,a].map(function(t){return '<option value="'+t.id+'"'+(t.id===evTeam?' selected':'')+'>'+esc(t.name)+'</option>';}).join('')+'</select></label>'+
       '<label class="setting"><span class="help">Jugador</span><select class="input" id="ev-player" data-change="ev-player" data-fk="evp">'+(players.length?players.map(function(p){return '<option value="'+p.id+'"'+(st.evPlayer===p.id?' selected':'')+'>'+(p.number!==''?'#'+esc(p.number)+' ':'')+esc(p.name)+(p.loanFrom?' (prestado de '+esc(p.loanFrom)+')':p.comodin?' (comodín)':'')+'</option>';}).join(''):'<option value="">Plantilla vacía</option>')+'</select></label></div>'+
@@ -1589,17 +1623,18 @@ function matchDialogHtml(st){
     var body;
     if(!luT.players.length) body='<p class="help">Este equipo no tiene jugadores en la plantilla.</p>';
     else {
-      var ns=l?l.starters.length:0, nb=l?l.subs.length:0, NX=expectedStarters(l), hasC=NX>N;
+      var ns=l?l.starters.length:0, nb=l?l.subs.length:0, NX=expectedStarters(m), hasC=!!m.wildOn;
       var loans=l?l.loans:[];
-      var rows=playersSorted(luT).map(function(p){return {p:p,from:null};}).concat(loans.map(function(id){var r=playerById(id);return r?{p:r.p,from:r.t}:null;}).filter(Boolean));
+      var rows=playersSorted(luT).map(function(p){return {p:p,from:null};}).concat(loans.map(function(id){var r=playerById(id);return r&&r.t?{p:r.p,from:r.t}:null;}).filter(Boolean))
+        .concat(wildOf(m,luTeam).map(function(id){var r=playerById(id);return r?{p:r.p,from:null,wild:true}:null;}).filter(Boolean));
       var others=[];
       state.teams.forEach(function(t){if(t.id===luTeam) return;
         var opts=playersSorted(t).filter(function(p){return loans.indexOf(p.id)<0&&!(m.lineups[t.id]&&(m.lineups[t.id].starters.indexOf(p.id)>=0||m.lineups[t.id].subs.indexOf(p.id)>=0))&&!loanedTo(m,p.id,luTeam);});
         if(opts.length) others.push('<optgroup label="'+esc(t.name)+'">'+opts.map(function(p){return '<option value="'+p.id+'">'+(p.number!==''?'#'+esc(p.number)+' ':'')+esc(p.name)+'</option>';}).join('')+'</optgroup>');});
-      body='<div class="lu-count"><span class="'+(l&&ns!==NX?'bad':'')+'">Titulares: '+ns+' de '+NX+(hasC?' (con comodín)':'')+'</span><span>Entraron: '+nb+'</span>'+(loans.length?'<span>Prestados: '+loans.length+'</span>':'')+(l?'':'<span>Sin alineación todavía</span>')+'</div>'+
+      body='<div class="lu-count"><span class="'+(l&&ns!==NX?'bad':'')+'">Titulares: '+ns+' de '+NX+(hasC?' (con comodines)':'')+'</span>'+(hasC?'<span>Comodines: '+wildOf(m,luTeam).length+'</span>':'')+'<span>Entraron: '+nb+'</span>'+(loans.length?'<span>Prestados: '+loans.length+'</span>':'')+(l?'':'<span>Sin alineación todavía</span>')+'</div>'+
         (l&&ns>NX?'<p class="warn">Hay '+ns+' titulares; en cancha arrancan '+NX+'.</p>':'')+
         '<ul class="lu-list">'+rows.map(function(o){
-          var p=o.p, away=o.from?null:loanedTo(m,p.id,luTeam);
+          var p=o.p, away=o.from||o.wild?null:loanedTo(m,p.id,luTeam);
           var role=l?(l.starters.indexOf(p.id)>=0?'starter':l.subs.indexOf(p.id)>=0?'sub':'none'):'none';
           var bt=function(r,txt,cls){return '<button type="button" class="'+(cls||'')+'" data-action="lu-set" data-player="'+p.id+'" data-role="'+r+'" data-fk="lu-'+p.id+'-'+r+'" aria-pressed="'+(role===r)+'">'+txt+'</button>';};
           var who='<span class="pl">'+(p.number!==''?'<span class="shirt">'+esc(p.number)+'</span>':'')+'<span>'+esc(p.name)+(p.comodin&&!o.from?'<span class="tag-c">Comodín</span>':'')+(o.from?'<small class="loan-note">Prestado de '+esc(o.from.name)+'</small>':p.pos?'<small>'+POSITIONS[p.pos]+'</small>':'')+'</span></span>';
@@ -1615,10 +1650,26 @@ function matchDialogHtml(st){
     }
     lu='<div class="recorder"><span class="lbl">Alineación</span>'+tabs+body+'</div>';
   }
+  var wildH='';
+  if(h&&a){
+    var pool=state.comodines||[], NN=state.starters+1, inner='';
+    if(m.wildOn){
+      if(!pool.length) inner='<p class="warn">No hay comodines anotados. Agrégalos en la pestaña Equipos, en la tarjeta Comodines.</p>';
+      else inner=[h,a].map(function(t){
+        var mine=wildOf(m,t.id), free=pool.filter(function(p){return !wildTeamOf(m,p.id);});
+        var chips=mine.map(function(id){var r=playerById(id),p=r.p;return '<span class="wchip">'+(p.number!==''?'#'+esc(p.number)+' ':'')+esc(p.name)+'<button class="icon-btn" data-action="wild-remove" data-team="'+t.id+'" data-player="'+id+'" aria-label="Quitar a '+esc(p.name)+' de '+esc(t.name)+'">'+ICON.close+'</button></span>';}).join('');
+        return '<div class="wild-team"><div class="wild-name"><span class="dot" style="background:'+t.color+'"></span><strong>'+esc(t.name)+'</strong><span class="help">'+mine.length+' de 2</span></div>'+
+          (chips?'<div class="wchips">'+chips+'</div>':'<p class="warn">Falta su comodín: cada equipo lleva al menos 1.</p>')+
+          (mine.length<2?'<span class="loan-row"><select class="input" id="wild-pick-'+t.id+'" data-fk="wp-'+t.id+'"'+(free.length?'':' disabled')+'>'+(free.length?'<option value="">Elegir comodín…</option>'+free.map(function(p){return '<option value="'+p.id+'">'+(p.number!==''?'#'+esc(p.number)+' ':'')+esc(p.name)+'</option>';}).join(''):'<option value="">No quedan comodines libres</option>')+'</select>'+
+          '<button class="btn btn-sm" data-action="wild-add" data-team="'+t.id+'" data-fk="wa-'+t.id+'"'+(free.length?'':' disabled')+'>Agregar</button></span>':'')+'</div>';
+      }).join('');
+    }
+    wildH='<div class="recorder"><span class="lbl">Comodines</span><label class="switch"><input type="checkbox" data-change="wild-on" data-fk="wildon"'+(m.wildOn?' checked':'')+'><span>Partido con comodines ('+NN+' contra '+NN+')</span></label>'+inner+'</div>';
+  }
   var evs='<div><span class="lbl">Eventos del partido</span>'+(m.events.length?'<ul class="ev-list">'+m.events.map(function(e){
     return '<li><span>'+(e.type==='goal'?ICON.ball:'<span class="chip-card '+e.type+'"></span>')+' <strong>'+esc(evName(e))+'</strong><span class="muted">'+esc(teamName(e.teamId))+'</span></span><button class="icon-btn" data-action="remove-event" data-ev="'+e.id+'" aria-label="Borrar este evento">'+ICON.trash+'</button></li>';
   }).join('')+'</ul>':'<p class="help" style="margin-top:4px">Aún no hay goles ni tarjetas.</p>')+'</div>';
-  return dlgHead(title,sub)+'<div class="dlg-body">'+teamSel+'<div class="sb">'+sideHtml('home',h)+'<div class="sb-vs">–</div>'+sideHtml('away',a)+'</div>'+pens+status+when+lu+rec+evs+'</div>'+
+  return dlgHead(title,sub)+'<div class="dlg-body">'+teamSel+'<div class="sb">'+sideHtml('home',h)+'<div class="sb-vs">–</div>'+sideHtml('away',a)+'</div>'+pens+status+when+wildH+lu+rec+evs+'</div>'+
     '<div class="dlg-foot"><button class="btn btn-primary" data-action="dlg-close">Listo</button></div>';
 }
 
@@ -1802,7 +1853,7 @@ function championText(){
   var ci=championInfo(), lines=['🏆 ¡*'+teamName(ci.champion)+'* es campeón de '+state.leagueName+'!',''];
   if(ci.runnerUp) lines.push('🥈 Subcampeón: '+teamName(ci.runnerUp));
   if(ci.third) lines.push('🥉 Tercer lugar: '+teamName(ci.third));
-  if(ci.scorer) lines.push('⚽ Goleador: '+ci.scorer.name+' ('+teamName(ci.scorer.teamId)+'), '+ci.scorer.goals+(ci.scorer.goals===1?' gol':' goles'));
+  if(ci.scorer) lines.push('⚽ Goleador: '+ci.scorer.name+' ('+teamLabel(ci.scorer.teamId)+'), '+ci.scorer.goals+(ci.scorer.goals===1?' gol':' goles'));
   return lines.join('\n');
 }
 function openShare(kind,mk,id){
@@ -1902,15 +1953,19 @@ function handleAction(action,el){
       }); break;
     case 'add-player':
       (function(){
-        var tid=d.team, tm=teamById(tid); if(!tm) return;
+        var tid=d.team, tm=rosterTeam(tid); if(!tm) return;
         var ni=document.getElementById('np-name-'+tid), nu=document.getElementById('np-num-'+tid), po=document.getElementById('np-pos-'+tid);
         var name=(ni&&ni.value||'').trim(); if(!name){toast('Escribe el nombre del jugador');if(ni) ni.focus();return;}
-        tm.players.push({id:uid('p'),name:name.slice(0,40),number:(nu&&nu.value||'').replace(/\D/g,'').slice(0,3),pos:po&&POSITIONS[po.value]?po.value:''});
-        forceFocus='npname-'+tid; commit(name+' añadido a '+tm.name);
+        var np={id:uid(tid==='wild'?'w':'p'),name:name.slice(0,40),number:(nu&&nu.value||'').replace(/\D/g,'').slice(0,3),pos:po&&POSITIONS[po.value]?po.value:''};
+        if(tid==='wild') np.comodin=true;
+        tm.players.push(np);
+        forceFocus='npname-'+tid; commit(tid==='wild'?name+' añadido a los comodines':name+' añadido a '+tm.name);
       })(); break;
     case 'remove-player':
-      t=teamById(d.team); if(!t) return;
-      (function(){var p=t.players.find(function(x){return x.id===d.player;}); if(!p) return; t.players=t.players.filter(function(x){return x!==p;}); commit(p.name+' quitado de la plantilla');})(); break;
+      t=rosterTeam(d.team); if(!t) return;
+      (function(){var p=t.players.find(function(x){return x.id===d.player;}); if(!p) return;
+        if(d.team==='wild'){state.comodines=state.comodines.filter(function(x){return x!==p;});commit(p.name+' quitado de los comodines');return;}
+        t.players=t.players.filter(function(x){return x!==p;}); commit(p.name+' quitado de la plantilla');})(); break;
     case 'regen':
       (function(){
         var random=d.mode==='random';
@@ -2075,7 +2130,7 @@ function handleAction(action,el){
       (function(){
         var tid=(dlgState.evTeam===m.homeId||dlgState.evTeam===m.awayId)?dlgState.evTeam:m.homeId;
         var sel=document.getElementById('ev-player'), pid=sel&&sel.value, q=playerById(pid), lx=lineupOf(m,tid);
-        var p=q&&(q.t.id===tid||(lx&&lx.loans.indexOf(pid)>=0))?q.p:null;
+        var p=q&&((q.t&&q.t.id===tid)||(lx&&lx.loans.indexOf(pid)>=0)||wildOf(m,tid).indexOf(pid)>=0)?q.p:null;
         if(!p){toast('Elige un jugador');return;}
         dlgState.evPlayer=p.id;
         m.events.push({id:uid('e'),type:d.type,teamId:tid,playerId:p.id,playerName:p.name});
@@ -2089,12 +2144,12 @@ function handleAction(action,el){
       (function(){
         var tid=(dlgState.luTeam===m.homeId||dlgState.luTeam===m.awayId)?dlgState.luTeam:m.homeId;
         var sel=document.getElementById('loan-pick'), pid=sel&&sel.value, q=playerById(pid);
-        if(!q){toast('Elige el jugador que va prestado');return;}
+        if(!q||!q.t){toast('Elige el jugador que va prestado');return;}
         if(q.t.id===tid) return;
         var l=m.lineups[tid]||(m.lineups[tid]={starters:[],subs:[],loans:[]}); l.loans=l.loans||[];
         if(l.loans.indexOf(pid)<0) l.loans.push(pid);
         var cur=lineupOf(m,tid);
-        if(l.starters.indexOf(pid)<0&&l.subs.indexOf(pid)<0){ if(cur.starters.length<expectedStarters(cur)) l.starters.push(pid); else l.subs.push(pid); }
+        if(l.starters.indexOf(pid)<0&&l.subs.indexOf(pid)<0){ if(cur.starters.length<expectedStarters(m)) l.starters.push(pid); else l.subs.push(pid); }
         commit(q.p.name+' juega prestado con '+teamName(tid));
       })(); break;
     case 'loan-remove':
@@ -2105,6 +2160,30 @@ function handleAction(action,el){
         l.loans=(l.loans||[]).filter(function(x){return x!==d.player;});
         l.starters=l.starters.filter(function(x){return x!==d.player;}); l.subs=l.subs.filter(function(x){return x!==d.player;});
         commit('Préstamo quitado');
+      })(); break;
+    case 'wild-add':
+      m=dlgMatch(); if(!m||!m.wildOn) return;
+      (function(){
+        var tid=d.team; if(tid!==m.homeId&&tid!==m.awayId) return;
+        var sel=document.getElementById('wild-pick-'+tid), pid=sel&&sel.value, q=playerById(pid);
+        if(!q||!q.wild){toast('Elige un comodín');return;}
+        var other=wildTeamOf(m,pid); if(other){toast(q.p.name+' ya juega con '+teamName(other));return;}
+        m.wild=m.wild||{}; var arr=m.wild[tid]=wildOf(m,tid);
+        if(arr.length>=2){toast('Máximo 2 comodines por equipo');return;}
+        arr.push(pid);
+        ensureLineups(m);
+        var l=m.lineups[tid]||(m.lineups[tid]={starters:[],subs:[],loans:[]});
+        if(l.starters.indexOf(pid)<0&&l.subs.indexOf(pid)<0){var cur=lineupOf(m,tid); if(cur.starters.length<expectedStarters(m)) l.starters.push(pid); else l.subs.push(pid);}
+        commit(q.p.name+' entra de comodín con '+teamName(tid));
+      })(); break;
+    case 'wild-remove':
+      m=dlgMatch(); if(!m) return;
+      (function(){
+        var tid=d.team, pid=d.player;
+        if(m.events.some(function(e){return e.playerId===pid&&e.teamId===tid;})){toast('Tiene goles o tarjetas en este partido. Bórralos primero.',4000);return;}
+        if(m.wild&&m.wild[tid]) m.wild[tid]=m.wild[tid].filter(function(x){return x!==pid;});
+        var l=m.lineups[tid]; if(l){l.starters=l.starters.filter(function(x){return x!==pid;}); l.subs=l.subs.filter(function(x){return x!==pid;});}
+        commit('Comodín quitado');
       })(); break;
     case 'lu-set':
       m=dlgMatch(); if(!m) return;
@@ -2119,7 +2198,7 @@ function handleAction(action,el){
       m=dlgMatch(); if(!m) return;
       (function(){
         var tid=(dlgState.luTeam===m.homeId||dlgState.luTeam===m.awayId)?dlgState.luTeam:m.homeId, b=baseIds(tid);
-        if(!b.length) return; var old=m.lineups[tid]; m.lineups[tid]={starters:b,subs:[],loans:old&&old.loans?old.loans:[]}; commit('Titulares base aplicados');
+        if(!b.length) return; var old=m.lineups[tid], w=wildOf(m,tid); m.lineups[tid]={starters:b.concat(w.slice(0,1)),subs:w.slice(1),loans:old&&old.loans?old.loans:[]}; commit('Titulares base aplicados');
       })(); break;
     case 'remove-event':
       m=dlgMatch(); if(!m) return;
@@ -2186,12 +2265,19 @@ function handleChange(kind,el){
     case 'ev-team': if(!dlgState) return; dlgState.evTeam=v; dlgState.evPlayer=null; refreshDialog(); break;
     case 'ev-player': if(!dlgState) return; dlgState.evPlayer=v; break;
     case 'lu-team': if(!dlgState) return; dlgState.luTeam=v; refreshDialog(); break;
+    case 'wild-on':
+      m=dlgMatch(); if(!m) return;
+      (function(){
+        if(el.checked){m.wildOn=true; m.wild=m.wild||{}; commit('Partido con comodines: '+(state.starters+1)+' contra '+(state.starters+1)); return;}
+        var ids=[]; Object.keys(m.wild||{}).forEach(function(k){ids=ids.concat(m.wild[k]||[]);});
+        if(m.events.some(function(e){return ids.indexOf(e.playerId)>=0;})){toast('Un comodín tiene goles o tarjetas en este partido. Bórralos primero.',4000);refreshDialog();return;}
+        Object.keys(m.lineups).forEach(function(k){var l=m.lineups[k]; l.starters=l.starters.filter(function(x){return ids.indexOf(x)<0;}); l.subs=l.subs.filter(function(x){return ids.indexOf(x)<0;});});
+        m.wildOn=false; m.wild={}; commit('Partido sin comodines');
+      })(); break;
     case 'p-base': p=playerOf(d.team,d.player); if(!p) return; p.base=el.checked; commit(); break;
     case 'p-role':
-      p=playerOf(d.team,d.player); t=teamById(d.team); if(!p||!t) return;
-      if(v==='comodin'){t.players.forEach(function(x){if(x!==p&&x.comodin) x.comodin=false;});p.comodin=true;p.base=false;}
-      else {p.comodin=false;p.base=v==='base';}
-      commit(v==='comodin'?p.name+' es el comodín de '+t.name:''); break;
+      p=playerOf(d.team,d.player); if(!p||d.team==='wild') return;
+      p.base=v==='base'; commit(); break;
     case 'starters': state.starters=Math.max(3,Math.min(11,parseInt(v,10)||5)); commit('Jugadores en cancha: '+state.starters); break;
   }
 }

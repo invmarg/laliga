@@ -716,6 +716,8 @@ function commit(msg){
   schedulePublish();
 }
 function saveUI(){ui.scroll=window.scrollY||0;lsSet(UI_KEY,JSON.stringify({tab:ui.tab,md:ui.md,team:ui.team,scroll:ui.scroll}));}
+document.addEventListener('visibilitychange',function(){if(document.hidden) saveUI(); else clampScroll();});
+window.addEventListener('pagehide',function(){saveUI();});
 function schedulePublish(delay){
   if(localMode||!(artifactApi||gs)||!canEdit||!dirty) return;
   clearTimeout(publishTimer);
@@ -1163,6 +1165,7 @@ function render(){
     }).join('')+'</div></nav>'+
     '<main class="wrap main" id="main">'+panel+'</main>';
   restoreFocus(fk);
+  clampScroll(); requestAnimationFrame(clampScroll);
 }
 function renderMasthead(){
   return '<header class="masthead">'+ICON.pitch+'<div class="wrap mast-inner"><div class="mast-title"><h1>'+esc(state.leagueName)+'</h1><p class="mast-sub">'+esc(phaseText())+'</p>'+((publicCopy||(gs&&!canEdit))&&state.updatedAt?'<p class="mast-sub" style="margin-top:2px;font-size:.85rem">Actualizada el '+esc(fmtDate(isoOf(state.updatedAt),true).toLowerCase())+'</p>':'')+'</div>'+renderSaveArea()+'</div></header>';
@@ -1940,7 +1943,7 @@ function handleAction(action,el){
   if(!isAdmin()&&!READONLY_ACTIONS[action]) return;
   if(!canEdit&&(action==='preview-on'||action==='preview-off')) return;
   switch(action){
-    case 'tab': ui.tab=d.tab; saveUI(); render(); window.scrollTo(0,0); break;
+    case 'tab': ui.tab=d.tab; window.scrollTo(0,0); saveUI(); render(); window.scrollTo(0,0); break;
     case 'team': openTeamSheet(d.id); break;
     case 'share': openShare(d.kind,d.mk,d.id); break;
     case 'edit-match': openMatchDialog(d.mk,d.id); break;
@@ -2327,7 +2330,9 @@ function applyDraft(){
     if(dft&&dft.updatedAt>state.updatedAt){state=dft;if(!localMode) dirty=true;}
   }catch(e){}
 }
-function restoreScroll(){if(ui.scroll){var y=ui.scroll;ui.scroll=0;requestAnimationFrame(function(){window.scrollTo(0,y);});}}
+function maxScroll(){return Math.max(0,document.documentElement.scrollHeight-window.innerHeight);}
+function clampScroll(){if(window.scrollY>maxScroll()+1) window.scrollTo(0,maxScroll());}
+function restoreScroll(){if(ui.scroll){var y=ui.scroll;ui.scroll=0;requestAnimationFrame(function(){window.scrollTo(0,Math.min(y,maxScroll()));});}}
 function initCaps(){
   var c=window.claude;
   if(needSetup){canEdit=false;localMode=false;render();return;}

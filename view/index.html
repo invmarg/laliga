@@ -447,6 +447,24 @@ function emptyMatch(extra){
 }
 function emptyPlayoffs(){var p={};KO_KEYS.forEach(function(k){p[k]=emptyMatch({id:k});});return p;}
 
+var FORMAT_LEGS={single:1,double:2,quad:4};
+var FORMAT_NAMES={single:'Solo ida',double:'Ida y vuelta',quad:'Ida y vuelta doble'};
+function formatCount(fmt,nt){var n=nt%2?nt+1:nt, legs=FORMAT_LEGS[fmt]||1;return {jornadas:(n-1)*legs,partidos:nt*(nt-1)/2*legs};}
+// Rehace el calendario a partir de la primera vuelta que ya existe (respeta el orden sorteado)
+function extendCalendar(fmt){
+  var ids=state.teams.map(function(t){return t.id;}), nt=ids.length; if(nt<2) return null;
+  var rounds=formatCount('single',nt).jornadas, legs=FORMAT_LEGS[fmt]||1;
+  var base=state.matches.filter(function(m){return m.matchday<=rounds;}), seen={};
+  if(base.length!==nt*(nt-1)/2) return null;
+  for(var i=0;i<base.length;i++){var m=base[i];
+    if(ids.indexOf(m.homeId)<0||ids.indexOf(m.awayId)<0||m.homeId===m.awayId) return null;
+    var k=[m.homeId,m.awayId].sort().join('|'); if(seen[k]) return null; seen[k]=1;}
+  base=base.slice().sort(function(x,y){return x.matchday-y.matchday;});
+  var out=[], c=1;
+  for(var l=0;l<legs;l++) base.forEach(function(m){var sw=l%2===1;out.push(emptyMatch({id:'m'+(c++),matchday:m.matchday+rounds*l,homeId:sw?m.awayId:m.homeId,awayId:sw?m.homeId:m.awayId}));});
+  out.sort(function(x,y){return x.matchday-y.matchday;});
+  return out;
+}
 function roundRobin(teams,format,random){
   var list=teams.map(function(t){return t.id;});
   if(random) shuffle(list);
@@ -463,7 +481,8 @@ function roundRobin(teams,format,random){
   if(random) shuffle(order);
   function md(r){return order.indexOf(r)+1;}
   var c=1, out=pairs.map(function(p){return emptyMatch({id:'m'+(c++),matchday:md(p.r),homeId:p.h,awayId:p.a});});
-  if(format==='double') pairs.forEach(function(p){out.push(emptyMatch({id:'m'+(c++),matchday:md(p.r)+rounds,homeId:p.a,awayId:p.h}));});
+  var legs=FORMAT_LEGS[format]||1;
+  for(var k=1;k<legs;k++) pairs.forEach(function(p){var sw=k%2===1;out.push(emptyMatch({id:'m'+(c++),matchday:md(p.r)+rounds*k,homeId:sw?p.a:p.h,awayId:sw?p.h:p.a}));});
   out.sort(function(a,b){return a.matchday-b.matchday;});
   return out;
 }
@@ -482,7 +501,7 @@ function seedState(){
 function normalize(raw){
   if(!raw||typeof raw!=='object'||!Array.isArray(raw.teams)) return null;
   var s={version:2,updatedAt:+raw.updatedAt||0,leagueName:String(raw.leagueName||'Liga Caimanera').slice(0,60),
-    format:raw.format==='double'?'double':'single',starters:Math.max(3,Math.min(11,parseInt(raw.starters,10)||5)),playoffsEnabled:raw.playoffsEnabled!==false,
+    format:FORMAT_LEGS[raw.format]?raw.format:'single',starters:Math.max(3,Math.min(11,parseInt(raw.starters,10)||5)),playoffsEnabled:raw.playoffsEnabled!==false,
     playoffsFormat:FORMATS.some(function(f){return f[0]===raw.playoffsFormat;})?raw.playoffsFormat:'semis_final'};
   s.teams=raw.teams.map(function(t,i){
     var id=String(t.id!=null?t.id:'t'+(i+1));
@@ -1471,7 +1490,8 @@ function renderConfigPanel(){
       '<input type="file" id="import-input" accept="application/json,.json" data-change="import" hidden></section>';
   var general='<section class="panel"><h2>General</h2>'+
       '<label class="setting"><span class="lbl">Nombre de la liga</span><input class="input" maxlength="60" value="'+esc(state.leagueName)+'" data-change="league-name" data-fk="cfgname"></label>'+
-      '<label class="setting"><span class="lbl">Fase regular</span><select class="input" data-change="format" data-fk="cfgfmt"><option value="single"'+(state.format==='single'?' selected':'')+'>Solo ida</option><option value="double"'+(state.format==='double'?' selected':'')+'>Ida y vuelta</option></select><span class="help">Cambiarla rehace el calendario.</span></label>'+
+      '<label class="setting"><span class="lbl">Fase regular</span><select class="input" data-change="format" data-fk="cfgfmt">'+['single','double','quad'].map(function(k){var c=formatCount(k,state.teams.length);return '<option value="'+k+'"'+(state.format===k?' selected':'')+'>'+FORMAT_NAMES[k]+' · '+c.jornadas+' jornadas</option>';}).join('')+'</select>'+
+        (function(){var c=formatCount(state.format,state.teams.length), legs=FORMAT_LEGS[state.format];return '<span class="help"><strong>'+c.partidos+' partidos en '+c.jornadas+' jornadas.</strong> '+(legs===4?'Ida: jornadas 1 a '+(c.jornadas/2)+' y vuelta: jornadas '+(c.jornadas/2+1)+' a '+c.jornadas+'. Cada equipo enfrenta 4 veces a cada rival, 2 de local y 2 de visitante. ':legs===2?'Cada equipo enfrenta 2 veces a cada rival, una de local y otra de visitante. ':'Cada equipo enfrenta una vez a cada rival. ')+'Cambiarla rehace el calendario.</span>';})()+'</label>'+
       '<label class="setting"><span class="lbl">Jugadores en cancha por equipo</span><input class="input" type="number" min="3" max="11" inputmode="numeric" value="'+state.starters+'" data-change="starters" data-fk="cfgst" style="max-width:120px"><span class="help">Se usa para revisar las alineaciones. Fútbol sala: 5. En los partidos con comodines cada equipo juega con uno más (6 contra 6).</span></label>'+
       '<label class="switch"><input type="checkbox" data-change="playoffs-enabled" data-fk="cfgko"'+(state.playoffsEnabled?' checked':'')+'><span>Jugar liguilla al terminar la fase regular</span></label>'+
     '</section>';
@@ -2216,8 +2236,12 @@ function handleChange(kind,el){
     case 'league-name': v=v.trim(); if(!v){render();return;} state.leagueName=v.slice(0,60); commit('Nombre de la liga actualizado'); break;
     case 'format':
       (function(){
-        var go=function(){state.format=v==='double'?'double':'single'; regenerate(false); commit(v==='double'?'Formato: ida y vuelta':'Formato: solo ida');};
-        if(hasResults()) askConfirm({title:'Cambiar formato',body:'El calendario se rehace y se borran los resultados cargados.',ok:'Cambiar formato',danger:true}).then(function(ok){if(ok) go(); else render();});
+        // Los partidos que quedan igual (misma jornada, local y visitante) conservan fecha, hora, cancha y resultados
+        var fmt=FORMAT_LEGS[v]?v:'single', fresh=extendCalendar(fmt)||roundRobin(state.teams,fmt,false), used=[];
+        var merged=fresh.map(function(nm){var o=state.matches.find(function(x){return used.indexOf(x)<0&&x.matchday===nm.matchday&&x.homeId===nm.homeId&&x.awayId===nm.awayId;});if(!o) return nm;used.push(o);o.id=nm.id;return o;});
+        var lost=state.matches.filter(function(o){return used.indexOf(o)<0&&(o.status!=='pending'||o.events.length||o.date||o.time||o.venue);});
+        var go=function(){state.format=fmt; state.matches=merged; if(lost.length) state.playoffs=emptyPlayoffs(); ui.md='all'; var c=formatCount(fmt,state.teams.length); commit('Formato: '+FORMAT_NAMES[fmt].toLowerCase()+' · '+c.partidos+' partidos en '+c.jornadas+' jornadas');};
+        if(lost.length) askConfirm({title:'Cambiar formato',body:'El calendario cambia y se pierden los datos cargados (resultados, fechas u horas) de '+lost.length+(lost.length===1?' partido.':' partidos.'),ok:'Cambiar formato',danger:true}).then(function(ok){if(ok) go(); else render();});
         else go();
       })(); break;
     case 'playoffs-enabled': state.playoffsEnabled=el.checked; commit(el.checked?'Liguilla activada':'Liguilla desactivada'); break;

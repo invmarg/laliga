@@ -529,6 +529,7 @@ function normalize(raw){
   function nm(m,extra){
     var e=emptyMatch(extra);
     e.homeId=tid(m.homeId); e.awayId=tid(m.awayId);
+    if(m.manualTeams===true) e.manualTeams=true;
     e.homeScore=num(m.homeScore); e.awayScore=num(m.awayScore);
     e.homePens=m.homePens==null||m.homePens===''?null:num(m.homePens);
     e.awayPens=m.awayPens==null||m.awayPens===''?null:num(m.awayPens);
@@ -642,7 +643,7 @@ function outcome(m){
 function resolveBracket(){
   if(koFormat()==='direct_final') return;
   var p=state.playoffs, o1=outcome(p.sf1), o2=outcome(p.sf2);
-  function fill(m,side,val){if(val&&m.status==='pending'&&!m.events.length) m[side]=val;}
+  function fill(m,side,val){if(val&&!m.manualTeams&&m.status==='pending'&&!m.events.length) m[side]=val;}
   if(o1){fill(p.final,'homeId',o1.w);fill(p.third,'homeId',o1.l);}
   if(o2){fill(p.final,'awayId',o2.w);fill(p.third,'awayId',o2.l);}
 }
@@ -945,7 +946,7 @@ function diffEvents(prev){
   if(!prev||!prev.matches) return [];
   var ev=[], sched=[], pm={};
   prev.matches.forEach(function(m){pm[m.id]=m;});
-  var sameCal=prev.matches.length===state.matches.length&&state.matches.every(function(m){var p=pm[m.id];return p&&p.homeId===m.homeId&&p.awayId===m.awayId&&p.matchday===m.matchday;});
+  var sameCal=prev.matches.length===state.matches.length&&state.matches.every(function(m){var p=pm[m.id];return p&&p.matchday===m.matchday&&(m.manualTeams||(p.homeId===m.homeId&&p.awayId===m.awayId));});
   if(!sameCal&&state.matches.length){
     var md=Math.max.apply(null,state.matches.map(function(m){return m.matchday;}));
     ev.push({tipo:'calendario',titulo:'Nuevo calendario',texto:state.matches.length+' partidos en '+md+' jornadas. Revisa cuándo juega tu equipo.'});
@@ -961,7 +962,7 @@ function diffEvents(prev){
       ev.push({tipo:'final',titulo:'Final · '+label,texto:scoreText(m)+pens+(sc?'. Goles: '+sc:'')});
       return;
     }
-    if(m.status==='finished'&&(p.homeScore!==m.homeScore||p.awayScore!==m.awayScore||p.homePens!==m.homePens||p.awayPens!==m.awayPens)){
+    if(m.status==='finished'&&(p.homeId!==m.homeId||p.awayId!==m.awayId||p.homeScore!==m.homeScore||p.awayScore!==m.awayScore||p.homePens!==m.homePens||p.awayPens!==m.awayPens)){
       ev.push({tipo:'marcador',titulo:'Resultado corregido · '+label,texto:scoreText(m)}); return;
     }
     if(m.status==='live'&&p.status==='pending') ev.push({tipo:'vivo',titulo:'Empezó · '+label,texto:vsText(m)+(m.venue?', '+m.venue:'')});
@@ -973,12 +974,17 @@ function diffEvents(prev){
     reds.forEach(function(r){ev.push({tipo:'roja',titulo:'Roja para '+evName(r),texto:'Jugador de '+teamName(r.teamId)+' · '+vsText(m)+', '+label});});
     if(m.status==='pending'&&(m.date||m.time)&&(p.date!==m.date||p.time!==m.time||p.venue!==m.venue)) sched.push(m);
   }
-  if(sameCal) state.matches.forEach(function(m){cmp(pm[m.id],m,'Jornada '+m.matchday);});
+  if(sameCal) state.matches.forEach(function(m){
+    var p=pm[m.id], label='Jornada '+m.matchday;
+    if(m.status==='pending'&&(p.homeId!==m.homeId||p.awayId!==m.awayId)){
+      ev.push({tipo:'calendario',titulo:'Enfrentamiento actualizado · '+label,texto:vsText(m)});
+    } else cmp(p,m,label);
+  });
   if(state.playoffsEnabled&&prev.playoffs){
     var L=koLabels(), set=[];
     KO_KEYS.forEach(function(k){
       var m=state.playoffs[k], p=prev.playoffs[k]; if(!m||!p) return;
-      if(m.homeId&&m.awayId&&(p.homeId!==m.homeId||p.awayId!==m.awayId)) set.push(L[k][0]+': '+vsText(m));
+      if(m.status==='pending'&&m.homeId&&m.awayId&&(p.homeId!==m.homeId||p.awayId!==m.awayId)) set.push(L[k][0]+': '+vsText(m));
       else cmp(p,m,L[k][0]);
     });
     if(set.length) ev.push({tipo:'liguilla',titulo:set.length===1?'Liguilla definida':'Cruces de la liguilla',texto:set.join(' · ')});
@@ -1597,6 +1603,91 @@ function askConfirm(o){
   });
 }
 
+/* Corrección manual de enfrentamientos */
+function samePair(m,st){
+  return (m.homeId===st.homeId&&m.awayId===st.awayId)||(m.homeId===st.awayId&&m.awayId===st.homeId);
+}
+function openPairDialog(mk,id){
+  var m=getMatch(mk,id); if(!m) return;
+  var st={type:'pair',mk:mk,id:id,homeId:m.homeId||'',awayId:m.awayId||'',original:JSON.stringify(m)};
+  openDialog(pairDialogHtml(st),'',st);
+}
+function pairDialogHtml(st){
+  var m=getMatch(st.mk,st.id), same=samePair(m,st), reversed=same&&m.homeId!==st.homeId;
+  var status=same?m.status:'pending', ko=st.mk==='ko';
+  function teams(side,label){
+    var selected=st[side+'Id'];
+    var opts='<option value="">Elige un equipo</option>'+state.teams.map(function(t){
+      return '<option value="'+esc(t.id)+'"'+(t.id===selected?' selected':'')+'>'+esc(t.name)+'</option>';
+    }).join('');
+    return '<label class="setting"><span class="lbl">'+label+'</span><select id="pair-'+side+'" class="input" data-change="pair-team" data-side="'+side+'" data-fk="pair-'+side+'">'+opts+'</select></label>';
+  }
+  function number(id,label,max,value){
+    return '<label class="setting"><span class="lbl">'+label+'</span><input id="pair-'+id+'" class="input" type="number" min="0" max="'+max+'" step="1" inputmode="numeric" value="'+(value==null?'':value)+'"></label>';
+  }
+  var hasDetails=m.status!=='pending'||m.homeScore||m.awayScore||m.homePens!=null||m.awayPens!=null||m.events.length||Object.keys(m.lineups).length;
+  var warning=!same&&hasDetails?'<p class="warn">Al guardar, se reemplazará el resultado anterior y se borrarán los goles con autor, las tarjetas y las alineaciones de este partido. Ingresa el marcador real antes de guardar si ya se jugó.</p>':'';
+  var statusOptions=Object.keys(STATUS_LABEL).map(function(key){
+    return '<option value="'+key+'"'+(key===status?' selected':'')+'>'+STATUS_LABEL[key]+'</option>';
+  }).join('');
+  return dlgHead('Editar enfrentamiento',matchLabel(st.mk,m))+'<div class="dlg-body">'+
+    '<div class="fields2">'+teams('home','Local')+teams('away','Visitante')+'</div>'+warning+
+    '<label class="setting"><span class="lbl">Estado</span><select id="pair-status" class="input" data-change="pair-status">'+statusOptions+'</select></label>'+
+    '<div id="pair-result"'+(status==='pending'?' hidden':'')+'><div class="fields2">'+
+    number('home-score','Goles del local',99,same?m[reversed?'awayScore':'homeScore']:null)+
+    number('away-score','Goles del visitante',99,same?m[reversed?'homeScore':'awayScore']:null)+'</div>'+
+    (ko?'<div class="fields2" style="margin-top:8px">'+
+      number('home-pens','Penales del local',30,same?m[reversed?'awayPens':'homePens']:null)+
+      number('away-pens','Penales del visitante',30,same?m[reversed?'homePens':'awayPens']:null)+
+      '</div><p class="help">Completa los penales si el partido terminó empatado y se definió por esa vía.</p>':'')+'</div>'+
+    '</div><div class="dlg-foot"><button type="button" class="btn" data-action="cancel-pair">Cancelar</button>'+
+    '<button type="button" class="btn btn-primary" data-action="save-pair">Guardar enfrentamiento</button></div>';
+}
+function savePair(){
+  var st=dlgState; if(!st||st.type!=='pair') return;
+  var m=getMatch(st.mk,st.id);
+  if(!m||JSON.stringify(m)!==st.original){
+    toast('El partido cambió. Vuelve a abrir la edición para revisarlo.'); return;
+  }
+  if(!teamById(st.homeId)||!teamById(st.awayId)||st.homeId===st.awayId){
+    toast('Selecciona dos equipos distintos'); return;
+  }
+  var same=samePair(m,st), reversed=same&&m.homeId!==st.homeId, ko=st.mk==='ko';
+  var status=st.el.querySelector('#pair-status').value, pending=status==='pending';
+  function score(side,field,max){
+    if(pending) return same?m[(reversed?(side==='home'?'away':'home'):side)+field]:(field==='Score'?0:null);
+    var input=st.el.querySelector('#pair-'+side+'-'+field.toLowerCase());
+    if(!input) return null;
+    if(input.validity.badInput) return NaN;
+    if(!input.value&&field==='Pens') return null;
+    return input.value&&input.validity.valid&&input.valueAsNumber<=max?input.valueAsNumber:NaN;
+  }
+  var hs=score('home','Score',99), as=score('away','Score',99);
+  var hp=ko?score('home','Pens',30):null, ap=ko?score('away','Pens',30):null;
+  if(Number.isNaN(hs)||Number.isNaN(as)){toast('Ingresa los dos marcadores con números enteros de 0 a 99');return;}
+  if(!pending&&(Number.isNaN(hp)||Number.isNaN(ap)||(hp===null)!==(ap===null)||(hp!==null&&(hs!==as||hp===ap)))){
+    toast('Para definir un empate, ingresa dos resultados distintos en los penales');return;
+  }
+  if(same&&[st.homeId,st.awayId].some(function(tid,i){
+    return m.events.filter(function(e){return e.type==='goal'&&e.teamId===tid;}).length>[hs,as][i];
+  })){toast('El marcador debe incluir los goles con autor ya registrados');return;}
+  var oldOutcome=ko?outcome(m):null;
+  if(!same){m.events=[];m.lineups={};}
+  if(m.homeId!==st.homeId||m.awayId!==st.awayId) m.manualTeams=true;
+  m.homeId=st.homeId; m.awayId=st.awayId;
+  m.homeScore=hs; m.awayScore=as; m.homePens=hp; m.awayPens=ap;
+  setStatus(m,status);
+  if(oldOutcome&&!outcome(m)&&koFormat()!=='direct_final'&&(st.id==='sf1'||st.id==='sf2')){
+    var key=st.id==='sf1'?'homeId':'awayId';
+    ['final','third'].forEach(function(id){
+      var next=state.playoffs[id], expected=id==='final'?oldOutcome.w:oldOutcome.l;
+      if(!next.manualTeams&&next.status==='pending'&&!next.events.length&&next[key]===expected) next[key]=null;
+    });
+  }
+  openMatchDialog(st.mk,st.id);
+  commit('Enfrentamiento guardado');
+}
+
 /* Partido */
 function openMatchDialog(mk,id){
   if(!getMatch(mk,id)) return;
@@ -1611,14 +1702,7 @@ function matchDialogHtml(st){
   function logged(tid){return m.events.filter(function(e){return e.type==='goal'&&e.teamId===tid;}).length;}
   var title=ko?koLabels()[m.id][0]:'Jornada '+m.matchday;
   var sub=ko?'':(h&&a?h.name+' contra '+a.name:'');
-  var teamSel='';
-  if(ko){
-    var locked=m.events.length>0;
-    var opts=function(sel){return '<option value="">Por definir</option>'+state.teams.map(function(t){return '<option value="'+t.id+'"'+(t.id===sel?' selected':'')+'>'+esc(t.name)+'</option>';}).join('');};
-    teamSel='<div class="fields2"><label class="setting"><span class="lbl">Local</span><select class="input" data-change="ko-team" data-side="home" data-fk="kh"'+(locked?' disabled':'')+'>'+opts(m.homeId)+'</select></label>'+
-      '<label class="setting"><span class="lbl">Visitante</span><select class="input" data-change="ko-team" data-side="away" data-fk="ka"'+(locked?' disabled':'')+'>'+opts(m.awayId)+'</select></label>'+
-      (locked?'<p class="help full">Para cambiar los equipos, primero borra los goles y tarjetas de este partido.</p>':'')+'</div>';
-  }
+  var teamSel='<div class="btn-row"><button type="button" class="btn" data-action="edit-pair">Editar enfrentamiento</button></div>';
   function sideHtml(side,t){
     var sc=side==='home'?m.homeScore:m.awayScore, g=t?logged(t.id):0, nm=t?esc(t.name):'Por definir';
     return '<div class="sb-side"><span class="sb-name">'+nm+'</span><div class="stepper">'+
@@ -1946,6 +2030,13 @@ function handleAction(action,el){
     case 'team': openTeamSheet(d.id); break;
     case 'share': openShare(d.kind,d.mk,d.id); break;
     case 'edit-match': openMatchDialog(d.mk,d.id); break;
+    case 'edit-pair':
+      if(dlgState&&dlgState.type==='match') openPairDialog(dlgState.mk,dlgState.id);
+      break;
+    case 'cancel-pair':
+      if(dlgState&&dlgState.type==='pair') openMatchDialog(dlgState.mk,dlgState.id);
+      break;
+    case 'save-pair': savePair(); break;
     case 'quick-status':
       m=getMatch(d.mk,d.id); if(!m) return;
       setStatus(m,d.status); commit(d.status==='live'?'Partido en vivo':'Partido finalizado'); break;
@@ -2262,13 +2353,16 @@ function handleChange(kind,el){
         rd.onerror=function(){toast('No se pudo leer el archivo.');};
         rd.readAsText(f);
       })(); break;
-    case 'ko-team':
-      m=dlgMatch(); if(!m) return;
-      (function(){
-        var side=d.side, other=side==='home'?m.awayId:m.homeId;
-        if(v&&v===other){toast('Elige dos equipos distintos');refreshDialog();return;}
-        m[side+'Id']=v||null; commit();
-      })(); break;
+    case 'pair-team':
+      if(dlgState&&dlgState.type==='pair'){
+        dlgState[d.side+'Id']=v;
+        setDialogContent(dlgState.el,pairDialogHtml(dlgState));
+        restoreFocus('pair-'+d.side);
+      }
+      break;
+    case 'pair-status':
+      if(dlgState&&dlgState.type==='pair') dlgState.el.querySelector('#pair-result').hidden=v==='pending';
+      break;
     case 'pens':
       m=dlgMatch(); if(!m) return;
       m[d.side+'Pens']=v===''?null:Math.max(0,Math.min(30,parseInt(v,10)||0)); commit(); break;
